@@ -1,0 +1,131 @@
+name: servarr-stack
+
+services:
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      TZ: ${TZ:-Etc/UTC}
+      VPN_SERVICE_PROVIDER: ${VPN_SERVICE_PROVIDER:?Set VPN_SERVICE_PROVIDER in .env}
+      VPN_TYPE: ${VPN_TYPE:-openvpn}
+      OPENVPN_USER: ${OPENVPN_USER:-}
+      OPENVPN_PASSWORD: ${OPENVPN_PASSWORD:-}
+      WIREGUARD_PRIVATE_KEY: ${WIREGUARD_PRIVATE_KEY:-}
+      WIREGUARD_ADDRESSES: ${WIREGUARD_ADDRESSES:-}
+      SERVER_COUNTRIES: ${SERVER_COUNTRIES:-}
+      FIREWALL_INPUT_PORTS: "8080,${TORRENTING_PORT:-6881}"
+    volumes:
+      - "${CONFIG_ROOT:?Set CONFIG_ROOT in .env}/gluetun:/gluetun"
+    ports:
+      - "${QBITTORRENT_WEBUI_PORT:-8080}:8080"
+      - "${TORRENTING_PORT:-6881}:${TORRENTING_PORT:-6881}/tcp"
+      - "${TORRENTING_PORT:-6881}:${TORRENTING_PORT:-6881}/udp"
+    healthcheck:
+      test: ["CMD-SHELL", "/gluetun-entrypoint healthcheck"]
+      interval: 5s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:5.1.4
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+        restart: true
+    environment:
+      TZ: ${TZ:-Etc/UTC}
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      WEBUI_PORT: "8080"
+      TORRENTING_PORT: ${TORRENTING_PORT:-6881}
+    volumes:
+      - "${CONFIG_ROOT}/qbittorrent:/config"
+      - "${MEDIA_ROOT:?Set MEDIA_ROOT in .env}:/media"
+      - "${DOWNLOADS_ROOT:?Set DOWNLOADS_ROOT in .env}:/downloads"
+    restart: unless-stopped
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    environment:
+      TZ: ${TZ:-Etc/UTC}
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+    volumes:
+      - "${CONFIG_ROOT}/prowlarr:/config"
+    ports:
+      - "${PROWLARR_PORT:-9696}:9696"
+    restart: unless-stopped
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    environment:
+      TZ: ${TZ:-Etc/UTC}
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+    volumes:
+      - "${CONFIG_ROOT}/sonarr:/config"
+      - "${MEDIA_ROOT}:/media"
+      - "${DOWNLOADS_ROOT}:/downloads"
+    ports:
+      - "${SONARR_PORT:-8989}:8989"
+    restart: unless-stopped
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    environment:
+      TZ: ${TZ:-Etc/UTC}
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+    volumes:
+      - "${CONFIG_ROOT}/radarr:/config"
+      - "${MEDIA_ROOT}:/media"
+      - "${DOWNLOADS_ROOT}:/downloads"
+    ports:
+      - "${RADARR_PORT:-7878}:7878"
+    restart: unless-stopped
+
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    environment:
+      TZ: ${TZ:-Etc/UTC}
+    volumes:
+      - "${CONFIG_ROOT}/jellyfin:/config"
+      - jellyfin-cache:/cache
+      - "${MEDIA_ROOT}:/media"
+    ports:
+      - "${JELLYFIN_PORT:-8096}:8096"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --noproxy 'localhost' -Lk -fsS http://localhost:8096/health || exit 1"]
+      interval: 30s
+      timeout: 30s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+
+  seerr:
+    image: ghcr.io/seerr-team/seerr:latest
+    environment:
+      TZ: ${TZ:-Etc/UTC}
+      LOG_LEVEL: info
+      PORT: "5055"
+    volumes:
+      - "${CONFIG_ROOT}/seerr:/app/config"
+    ports:
+      - "${SEERR_PORT:-5055}:5055"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:5055/api/v1/settings/public || exit 1"]
+      interval: 15s
+      timeout: 3s
+      start_period: 20s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  jellyfin-cache:
+

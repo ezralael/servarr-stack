@@ -1,0 +1,30 @@
+# Local secrets and environment overrides
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.pfx
+*.ovpn
+*.conf
+wg0.*
+
+# Runtime data: databases, credentials, history, logs, caches, and media
+data/
+config/
+downloads/
+media/
+backups/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite*
+*.log
+
+# Editor and operating-system noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.tmp-docker-config/
+
