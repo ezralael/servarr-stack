@@ -50,23 +50,23 @@ The defaults keep runtime data below the clone, but every root is configurable:
 
 ```text
 servarr-stack/
-â”œâ”€â”€ data/
-â”‚   â”œâ”€â”€ config/
-â”‚   â”‚   â”œâ”€â”€ gluetun/
-â”‚   â”‚   â”œâ”€â”€ qbittorrent/
-â”‚   â”‚   â”œâ”€â”€ prowlarr/
-â”‚   â”‚   â”œâ”€â”€ sonarr/
-â”‚   â”‚   â”œâ”€â”€ radarr/
-â”‚   â”‚   â”œâ”€â”€ jellyfin/
-â”‚   â”‚   â””â”€â”€ seerr/
-â”‚   â”œâ”€â”€ downloads/
-â”‚   â”‚   â”œâ”€â”€ complete/
-â”‚   â”‚   â””â”€â”€ incomplete/
-â”‚   â””â”€â”€ media/
-â”‚       â”œâ”€â”€ movies/
-â”‚       â””â”€â”€ tv/
-â”œâ”€â”€ .env                 # local only; never commit
-â””â”€â”€ docker-compose.yml
+├── data/
+│   ├── config/
+│   │   ├── gluetun/
+│   │   ├── qbittorrent/
+│   │   ├── prowlarr/
+│   │   ├── sonarr/
+│   │   ├── radarr/
+│   │   ├── jellyfin/
+│   │   └── seerr/
+│   ├── downloads/
+│   │   ├── complete/
+│   │   └── incomplete/
+│   └── media/
+│       ├── movies/
+│       └── tv/
+├── .env                 # local only; never commit
+└── docker-compose.yml
 ```
 
 Inside qBittorrent, Sonarr, and Radarr, downloads are always `/downloads`. Inside Sonarr, Radarr, and Jellyfin, organized media is always `/media`. Those consistent container paths avoid remote-path mappings and let imports work regardless of host path syntax. Hardlinks require downloads and media to be on the same underlying filesystem; otherwise imports use copies.
@@ -109,9 +109,9 @@ Compare that last address with your normal public address. qBittorrent cannot cr
 ## First-time application setup
 
 1. **qBittorrent:** Open port 8080. Find the temporary admin password in `docker compose logs qbittorrent`, sign in, and change it. Set the default save path to `/downloads/complete` and incomplete path to `/downloads/incomplete`. Keep the Web UI port at `8080` inside the container.
-2. **Sonarr:** Add `/media/tv` as the root folder. Under **Settings â†’ Download Clients**, add qBittorrent with host `gluetun`, port `8080`, and its Web UI credentials. Use category `tv`.
+2. **Sonarr:** Add `/media/tv` as the root folder. Under **Settings → Download Clients**, add qBittorrent with host `gluetun`, port `8080`, and its Web UI credentials. Use category `tv`.
 3. **Radarr:** Add `/media/movies` as the root folder. Add the same qBittorrent endpoint (`gluetun:8080`) with category `movies`.
-4. **Prowlarr:** Add only indexers you are authorized to use. Under **Settings â†’ Apps**, add Sonarr at `http://sonarr:8989` and Radarr at `http://radarr:7878`, using the API keys displayed in each app under **Settings â†’ General**.
+4. **Prowlarr:** Add only indexers you are authorized to use. Under **Settings → Apps**, add Sonarr at `http://sonarr:8989` and Radarr at `http://radarr:7878`, using the API keys displayed in each app under **Settings → General**.
 5. **Jellyfin:** Create a new local administrator, then add a Shows library at `/media/tv` and a Movies library at `/media/movies`. Do not expose Jellyfin directly to the internet without authentication and a properly configured reverse proxy.
 6. **Seerr:** Connect Jellyfin at `http://jellyfin:8096`, then connect Sonarr and Radarr using their internal service URLs and API keys.
 
@@ -201,4 +201,3 @@ Change the corresponding value in `.env` (for example `SONARR_PORT=8990`) and ru
 ## License
 
 The orchestration files and installers in this repository are provided under the MIT License. Each container image and application has its own license.
-

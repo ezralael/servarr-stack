@@ -78,4 +78,3 @@ if ($bashCommand -and $bashCommand.Source -notmatch '(?i)\\Windows\\system32\\ba
 }
 
 Write-Host "All repository verification checks passed."
-

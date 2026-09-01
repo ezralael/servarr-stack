@@ -136,4 +136,3 @@ printf '  Radarr        http://localhost:%s\n' "$(env_port RADARR_PORT 7878)"
 printf '  Jellyfin      http://localhost:%s\n' "$(env_port JELLYFIN_PORT 8096)"
 printf '  Seerr         http://localhost:%s\n' "$(env_port SEERR_PORT 5055)"
 printf 'Gluetun has no Web UI. Check it with: docker compose ps\n'
-

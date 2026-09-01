@@ -135,4 +135,3 @@ Write-Host "  Radarr        http://localhost:$(Get-EnvSetting 'RADARR_PORT' '787
 Write-Host "  Jellyfin      http://localhost:$(Get-EnvSetting 'JELLYFIN_PORT' '8096')"
 Write-Host "  Seerr         http://localhost:$(Get-EnvSetting 'SEERR_PORT' '5055')"
 Write-Host "Gluetun has no Web UI. Check it with: docker compose ps"
-
