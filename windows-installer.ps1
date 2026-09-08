@@ -89,15 +89,14 @@ $intro.Size = [Drawing.Size]::new(710, 42)
 $form.Controls.Add($intro)
 
 $defaultData = Join-Path $stackRoot "data"
-$mediaField = Add-TextField $form "Media directory" 110 (Join-Path $defaultData "media") -Browse
-$downloadsField = Add-TextField $form "Downloads directory" 150 (Join-Path $defaultData "downloads") -Browse
-$configField = Add-TextField $form "Application config directory" 190 (Join-Path $defaultData "config") -Browse
+$dataField = Add-TextField $form "Shared data directory" 110 $defaultData -Browse
+$configField = Add-TextField $form "Application config directory" 150 (Join-Path $stackRoot "config") -Browse
 
 $useVpn = [Windows.Forms.CheckBox]::new()
 $useVpn.Text = "Route qBittorrent through a VPN (recommended)"
 $useVpn.Checked = $true
 $useVpn.Font = [Drawing.Font]::new("Segoe UI Semibold", 9)
-$useVpn.Location = [Drawing.Point]::new(22, 225)
+$useVpn.Location = [Drawing.Point]::new(22, 190)
 $useVpn.Size = [Drawing.Size]::new(330, 28)
 $form.Controls.Add($useVpn)
 
@@ -105,14 +104,14 @@ $directWarning = [Windows.Forms.Label]::new()
 $directWarning.Text = "WARNING: Without a VPN, torrent peers can see your public IP address."
 $directWarning.Font = [Drawing.Font]::new("Segoe UI Semibold", 9)
 $directWarning.ForeColor = [Drawing.Color]::DarkRed
-$directWarning.Location = [Drawing.Point]::new(355, 229)
+$directWarning.Location = [Drawing.Point]::new(355, 194)
 $directWarning.Size = [Drawing.Size]::new(375, 25)
 $directWarning.Visible = $false
 $form.Controls.Add($directWarning)
 
 $vpnGroup = [Windows.Forms.GroupBox]::new()
 $vpnGroup.Text = "VPN connection"
-$vpnGroup.Location = [Drawing.Point]::new(18, 258)
+$vpnGroup.Location = [Drawing.Point]::new(18, 223)
 $vpnGroup.Size = [Drawing.Size]::new(714, 245)
 $form.Controls.Add($vpnGroup)
 
@@ -204,39 +203,39 @@ $useVpn.Add_CheckedChanged({
 
 $validateOnly = [Windows.Forms.CheckBox]::new()
 $validateOnly.Text = "Validate only (do not pull images or start containers)"
-$validateOnly.Location = [Drawing.Point]::new(22, 515)
+$validateOnly.Location = [Drawing.Point]::new(22, 480)
 $validateOnly.Size = [Drawing.Size]::new(360, 24)
 $form.Controls.Add($validateOnly)
 
 $openJellyfin = [Windows.Forms.CheckBox]::new()
 $openJellyfin.Text = "Open Jellyfin setup when installation finishes"
 $openJellyfin.Checked = $true
-$openJellyfin.Location = [Drawing.Point]::new(390, 515)
+$openJellyfin.Location = [Drawing.Point]::new(390, 480)
 $openJellyfin.Size = [Drawing.Size]::new(340, 24)
 $form.Controls.Add($openJellyfin)
 
 $existingNotice = [Windows.Forms.Label]::new()
-$existingNotice.Location = [Drawing.Point]::new(22, 545)
+$existingNotice.Location = [Drawing.Point]::new(22, 510)
 $existingNotice.Size = [Drawing.Size]::new(710, 34)
 $existingNotice.ForeColor = [Drawing.Color]::FromArgb(120, 70, 0)
 $form.Controls.Add($existingNotice)
 
 $progress = [Windows.Forms.ProgressBar]::new()
-$progress.Location = [Drawing.Point]::new(22, 585)
+$progress.Location = [Drawing.Point]::new(22, 550)
 $progress.Size = [Drawing.Size]::new(558, 25)
 $progress.Style = "Blocks"
 $form.Controls.Add($progress)
 
 $installButton = [Windows.Forms.Button]::new()
 $installButton.Text = "Install"
-$installButton.Location = [Drawing.Point]::new(595, 581)
+$installButton.Location = [Drawing.Point]::new(595, 546)
 $installButton.Size = [Drawing.Size]::new(135, 34)
 $form.AcceptButton = $installButton
 $form.Controls.Add($installButton)
 
 $outputBox = [Windows.Forms.TextBox]::new()
-$outputBox.Location = [Drawing.Point]::new(22, 628)
-$outputBox.Size = [Drawing.Size]::new(708, 70)
+$outputBox.Location = [Drawing.Point]::new(22, 593)
+$outputBox.Size = [Drawing.Size]::new(708, 105)
 $outputBox.Multiline = $true
 $outputBox.ScrollBars = "Vertical"
 $outputBox.ReadOnly = $true
@@ -245,8 +244,7 @@ $outputBox.Text = "Ready. Docker Desktop must be installed and running."
 $form.Controls.Add($outputBox)
 
 $configurationControls = @(
-    $mediaField, $mediaField.Tag, $downloadsField, $downloadsField.Tag,
-    $configField, $configField.Tag, $useVpn, $providerField,
+    $dataField, $dataField.Tag, $configField, $configField.Tag, $useVpn, $providerField,
     $typeField, $credentialOneField, $credentialTwoField
 )
 $existingEnvironment = Test-Path -LiteralPath $envPath
@@ -307,9 +305,9 @@ $timer.Add_Tick({
 $installButton.Add_Click({
     if ($script:installing) { return }
     if (-not $existingEnvironment) {
-        foreach ($field in @($mediaField, $downloadsField, $configField)) {
+        foreach ($field in @($dataField, $configField)) {
             if ([string]::IsNullOrWhiteSpace($field.Text)) {
-                [Windows.Forms.MessageBox]::Show("Choose the media, downloads, and application-config folders.", "Servarr Stack", "OK", "Warning") | Out-Null
+                [Windows.Forms.MessageBox]::Show("Choose the shared data and application-config folders.", "Servarr Stack", "OK", "Warning") | Out-Null
                 return
             }
         }
@@ -336,8 +334,7 @@ $installButton.Add_Click({
 
     $arguments = @{ NonInteractive = $true }
     if (-not $existingEnvironment) {
-        $arguments.MediaPath = $mediaField.Text
-        $arguments.DownloadsPath = $downloadsField.Text
+        $arguments.DataPath = $dataField.Text
         $arguments.ConfigPath = $configField.Text
         if ($useVpn.Checked) {
             $arguments.NetworkMode = "vpn"

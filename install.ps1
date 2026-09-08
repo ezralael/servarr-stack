@@ -1,7 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$MediaPath,
-    [string]$DownloadsPath,
+    [string]$DataPath,
     [string]$ConfigPath,
     [string]$TimeZone = "Etc/UTC",
     [string]$VpnProvider,
@@ -58,6 +57,24 @@ function Get-EnvRawSetting {
     return $value
 }
 
+function Test-HardlinkLayout {
+    param([string]$Root)
+    $token = ".servarr-hardlink-test-$([guid]::NewGuid().ToString('N')).tmp"
+    $source = Join-Path $Root "downloads/complete/$token"
+    $link = Join-Path $Root "media/movies/$token"
+    try {
+        New-Item -ItemType File -Path $source -ErrorAction Stop | Out-Null
+        New-Item -ItemType HardLink -Path $link -Target $source -ErrorAction Stop | Out-Null
+    } catch {
+        throw "The selected data directory does not support hardlinks across its downloads and media folders. Choose one local NTFS/ext4/XFS-style data root instead of separate disks or a network share. $($_.Exception.Message)"
+    } finally {
+        foreach ($testFile in @($link, $source)) {
+            if (Test-Path -LiteralPath $testFile -PathType Leaf) { Remove-Item -LiteralPath $testFile -Force }
+        }
+    }
+    Write-Host "Verified hardlink support in the selected data directory."
+}
+
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw "Docker was not found. Install Docker Desktop, start it, and rerun this script."
 }
@@ -68,6 +85,9 @@ if ($LASTEXITCODE -ne 0) { throw "Docker Compose v2 ('docker compose') is requir
 
 if (Test-Path -LiteralPath $envFile) {
     Write-Host "Using the existing .env. No values or data were overwritten."
+    if (-not (Select-String -LiteralPath $envFile -Pattern '^DATA_ROOT=' -Quiet)) {
+        throw "This .env uses the older separate media/download mounts. Back up the stack and follow the hardlink migration section in README.md before rerunning the installer."
+    }
     $activeProfile = Get-EnvRawSetting "COMPOSE_PROFILES" "vpn"
     if ($activeProfile -notin @("vpn", "direct")) { throw "COMPOSE_PROFILES in .env must be vpn or direct." }
     if (-not (Select-String -LiteralPath $envFile -Pattern '^COMPOSE_PROFILES=' -Quiet)) {
@@ -76,9 +96,8 @@ if (Test-Path -LiteralPath $envFile) {
     }
 } else {
     $defaultData = Join-Path $stackRoot "data"
-    $MediaPath = Read-Value "Media directory" $MediaPath (Join-Path $defaultData "media")
-    $DownloadsPath = Read-Value "Downloads directory" $DownloadsPath (Join-Path $defaultData "downloads")
-    $ConfigPath = Read-Value "Application config directory" $ConfigPath (Join-Path $defaultData "config")
+    $DataPath = Read-Value "Shared data directory (contains media and downloads)" $DataPath $defaultData
+    $ConfigPath = Read-Value "Application config directory" $ConfigPath (Join-Path $stackRoot "config")
     if ($NetworkMode -eq "vpn") {
         $VpnProvider = Read-Value "Gluetun VPN provider identifier" $VpnProvider "your-provider"
         if ($VpnType -eq "openvpn") {
@@ -93,25 +112,36 @@ if (Test-Path -LiteralPath $envFile) {
         Write-Warning "DIRECT MODE: qBittorrent traffic will not use a VPN, and torrent peers can see this connection's public IP address."
     }
 
-    $MediaPath = [IO.Path]::GetFullPath($MediaPath).Replace('\', '/')
-    $DownloadsPath = [IO.Path]::GetFullPath($DownloadsPath).Replace('\', '/')
-    $ConfigPath = [IO.Path]::GetFullPath($ConfigPath).Replace('\', '/')
-    @($MediaPath, $DownloadsPath, $ConfigPath) | ForEach-Object {
+    $fullDataPath = [IO.Path]::GetFullPath($DataPath).TrimEnd('\', '/')
+    $fullConfigPath = [IO.Path]::GetFullPath($ConfigPath).TrimEnd('\', '/')
+    if ($fullDataPath -eq [IO.Path]::GetPathRoot($fullDataPath).TrimEnd('\', '/')) {
+        throw "Choose a data folder below the drive root; the installer will not mount an entire drive."
+    }
+    $dataPrefix = $fullDataPath + [IO.Path]::DirectorySeparatorChar
+    $configPrefix = $fullConfigPath + [IO.Path]::DirectorySeparatorChar
+    if ($fullDataPath -eq $fullConfigPath -or
+        $fullConfigPath.StartsWith($dataPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+        $fullDataPath.StartsWith($configPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "The data and application-config folders must be separate and must not contain one another."
+    }
+    $DataPath = $fullDataPath.Replace('\', '/')
+    $ConfigPath = $fullConfigPath.Replace('\', '/')
+    @($DataPath, $ConfigPath) | ForEach-Object {
         New-Item -ItemType Directory -Path $_ -Force | Out-Null
     }
     @("movies", "tv") | ForEach-Object {
-        New-Item -ItemType Directory -Path (Join-Path $MediaPath $_) -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $DataPath "media/$_") -Force | Out-Null
     }
     @("complete", "incomplete") | ForEach-Object {
-        New-Item -ItemType Directory -Path (Join-Path $DownloadsPath $_) -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $DataPath "downloads/$_") -Force | Out-Null
     }
+    Test-HardlinkLayout $DataPath
     @("gluetun", "qbittorrent", "prowlarr", "sonarr", "radarr", "jellyfin", "seerr") | ForEach-Object {
         New-Item -ItemType Directory -Path (Join-Path $ConfigPath $_) -Force | Out-Null
     }
 
     $lines = @(
-        "MEDIA_ROOT=$(ConvertTo-EnvValue $MediaPath)",
-        "DOWNLOADS_ROOT=$(ConvertTo-EnvValue $DownloadsPath)",
+        "DATA_ROOT=$(ConvertTo-EnvValue $DataPath)",
         "CONFIG_ROOT=$(ConvertTo-EnvValue $ConfigPath)",
         "PUID=$Puid", "PGID=$Pgid", "TZ=$(ConvertTo-EnvValue $TimeZone)",
         "COMPOSE_PROFILES=$(ConvertTo-EnvValue $NetworkMode)",

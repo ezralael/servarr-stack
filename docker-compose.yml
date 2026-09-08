@@ -10,8 +10,7 @@ x-qbittorrent-common: &qbittorrent-common
     TORRENTING_PORT: ${TORRENTING_PORT:-6881}
   volumes:
     - "${CONFIG_ROOT:?Set CONFIG_ROOT in .env}/qbittorrent:/config"
-    - "${MEDIA_ROOT:?Set MEDIA_ROOT in .env}:/media"
-    - "${DOWNLOADS_ROOT:?Set DOWNLOADS_ROOT in .env}:/downloads"
+    - "${DATA_ROOT:?Set DATA_ROOT in .env}:/data"
   restart: unless-stopped
 
 services:
@@ -83,8 +82,7 @@ services:
       PGID: ${PGID:-1000}
     volumes:
       - "${CONFIG_ROOT}/sonarr:/config"
-      - "${MEDIA_ROOT}:/media"
-      - "${DOWNLOADS_ROOT}:/downloads"
+      - "${DATA_ROOT}:/data"
     ports:
       - "${SONARR_PORT:-8989}:8989"
     restart: unless-stopped
@@ -97,8 +95,7 @@ services:
       PGID: ${PGID:-1000}
     volumes:
       - "${CONFIG_ROOT}/radarr:/config"
-      - "${MEDIA_ROOT}:/media"
-      - "${DOWNLOADS_ROOT}:/downloads"
+      - "${DATA_ROOT}:/data"
     ports:
       - "${RADARR_PORT:-7878}:7878"
     restart: unless-stopped
@@ -110,7 +107,7 @@ services:
     volumes:
       - "${CONFIG_ROOT}/jellyfin:/config"
       - jellyfin-cache:/cache
-      - "${MEDIA_ROOT}:/media"
+      - "${DATA_ROOT}/media:/media"
     ports:
       - "${JELLYFIN_PORT:-8096}:8096"
     healthcheck:

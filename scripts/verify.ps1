@@ -31,16 +31,18 @@ Assert-True (-not $directResolved.services.PSObject.Properties["gluetun"]) "Dire
 Assert-True ($directQb.network_mode -ne "service:gluetun") "Direct qBittorrent has an independent network"
 Assert-True (@($directQb.ports | Where-Object { $_.target -eq 8080 }).Count -eq 1) "Direct qBittorrent publishes its Web UI"
 
+$dataMounts = @{}
 foreach ($service in @("qbittorrent-vpn", "sonarr", "radarr")) {
-    $targets = @($vpnResolved.services.$service.volumes | ForEach-Object { $_.target })
-    Assert-True ($targets -contains "/downloads") "$service has the shared /downloads path"
+    $mount = @($vpnResolved.services.$service.volumes | Where-Object { $_.target -eq "/data" })
+    Assert-True ($mount.Count -eq 1 -and $mount[0].type -eq "bind") "$service has one shared /data bind mount"
+    $dataMounts[$service] = $mount[0].source
 }
-Assert-True (@($directQb.volumes | ForEach-Object { $_.target }) -contains "/downloads") "direct qBittorrent has the shared /downloads path"
-foreach ($service in @("qbittorrent-vpn", "sonarr", "radarr", "jellyfin")) {
-    $targets = @($vpnResolved.services.$service.volumes | ForEach-Object { $_.target })
-    Assert-True ($targets -contains "/media") "$service has the shared /media path"
-}
-Assert-True (@($directQb.volumes | ForEach-Object { $_.target }) -contains "/media") "direct qBittorrent has the shared /media path"
+$directData = @($directQb.volumes | Where-Object { $_.target -eq "/data" })
+Assert-True ($directData.Count -eq 1 -and $directData[0].type -eq "bind") "direct qBittorrent has one shared /data bind mount"
+$dataSources = @($dataMounts.Values) + @($directData[0].source)
+Assert-True (@($dataSources | Select-Object -Unique).Count -eq 1) "qBittorrent, Sonarr, and Radarr use the identical data mount source"
+$jellyfinMedia = @($vpnResolved.services.jellyfin.volumes | Where-Object { $_.target -eq "/media" })
+Assert-True ($jellyfinMedia.Count -eq 1 -and $jellyfinMedia[0].type -eq "bind") "Jellyfin has the organized media bind mount"
 foreach ($service in @("gluetun", "qbittorrent-vpn", "prowlarr", "sonarr", "radarr", "jellyfin", "seerr")) {
     Assert-True ($vpnResolved.services.$service.restart -eq "unless-stopped") "$service is restart-safe"
 }

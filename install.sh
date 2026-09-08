@@ -3,8 +3,7 @@ set -Eeuo pipefail
 
 stack_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 env_file="$stack_root/.env"
-media_path=""
-downloads_path=""
+data_path=""
 config_path=""
 timezone="Etc/UTC"
 vpn_provider=""
@@ -18,15 +17,14 @@ non_interactive=false
 no_launch=false
 
 usage() {
-  printf '%s\n' "Usage: ./install.sh [--media PATH] [--downloads PATH] [--config PATH]" \
+  printf '%s\n' "Usage: ./install.sh [--data PATH] [--config PATH]" \
     "  [--vpn-provider NAME] [--vpn-type openvpn|wireguard] [--timezone ZONE]" \
     "  [--without-vpn] [--non-interactive] [--no-launch]"
 }
 
 while (($#)); do
   case "$1" in
-    --media) media_path=${2:?Missing value}; shift 2 ;;
-    --downloads) downloads_path=${2:?Missing value}; shift 2 ;;
+    --data) data_path=${2:?Missing value}; shift 2 ;;
     --config) config_path=${2:?Missing value}; shift 2 ;;
     --timezone) timezone=${2:?Missing value}; shift 2 ;;
     --vpn-provider) vpn_provider=${2:?Missing value}; shift 2 ;;
@@ -77,6 +75,10 @@ env_quote() {
 
 if [[ -f "$env_file" ]]; then
   printf 'Using the existing .env. No values or data were overwritten.\n'
+  grep -q '^DATA_ROOT=' "$env_file" || {
+    printf 'This .env uses older separate media/download mounts. Back up the stack and follow the hardlink migration section in README.md.\n' >&2
+    exit 2
+  }
   saved_profile=$(sed -n 's/^COMPOSE_PROFILES=//p' "$env_file" | tail -n 1)
   saved_profile=${saved_profile#\'}; saved_profile=${saved_profile%\'}; saved_profile=${saved_profile#\"}; saved_profile=${saved_profile%\"}
   if [[ -n "$saved_profile" ]]; then
@@ -90,9 +92,8 @@ if [[ -f "$env_file" ]]; then
     printf 'COMPOSE_PROFILES in .env must be vpn or direct.\n' >&2; exit 2;
   }
 else
-  media_path=$(prompt "Media directory" "$media_path" "$stack_root/data/media")
-  downloads_path=$(prompt "Downloads directory" "$downloads_path" "$stack_root/data/downloads")
-  config_path=$(prompt "Application config directory" "$config_path" "$stack_root/data/config")
+  data_path=$(prompt "Shared data directory (contains media and downloads)" "$data_path" "$stack_root/data")
+  config_path=$(prompt "Application config directory" "$config_path" "$stack_root/config")
   if [[ "$network_mode" == vpn ]]; then
     vpn_provider=$(prompt "Gluetun VPN provider identifier" "$vpn_provider" "your-provider")
     if [[ "$vpn_type" == openvpn ]]; then
@@ -107,19 +108,31 @@ else
     printf '\nWARNING: DIRECT MODE ENABLED. qBittorrent traffic will not use a VPN, and torrent peers can see this connection\x27s public IP address.\n\n' >&2
   fi
 
-  mkdir -p -- "$media_path" "$downloads_path" "$config_path"
-  mkdir -p -- "$media_path/movies" "$media_path/tv" "$downloads_path/complete" "$downloads_path/incomplete"
+  mkdir -p -- "$data_path" "$config_path"
+  mkdir -p -- "$data_path/media/movies" "$data_path/media/tv" "$data_path/downloads/complete" "$data_path/downloads/incomplete"
+  hardlink_source=$(mktemp -- "$data_path/downloads/complete/.servarr-hardlink-test.XXXXXX")
+  hardlink_target="$data_path/media/movies/.$(basename -- "$hardlink_source").link"
+  if ! ln -- "$hardlink_source" "$hardlink_target"; then
+    rm -f -- "$hardlink_source" "$hardlink_target"
+    printf 'The selected data directory cannot hardlink between downloads and media. Choose one local hardlink-capable data root instead of separate disks or a network share.\n' >&2
+    exit 2
+  fi
+  rm -f -- "$hardlink_source" "$hardlink_target"
+  printf 'Verified hardlink support in the selected data directory.\n'
   for app in gluetun qbittorrent prowlarr sonarr radarr jellyfin seerr; do
     mkdir -p -- "$config_path/$app"
   done
-  media_path=$(cd -- "$media_path" && pwd -P)
-  downloads_path=$(cd -- "$downloads_path" && pwd -P)
+  data_path=$(cd -- "$data_path" && pwd -P)
   config_path=$(cd -- "$config_path" && pwd -P)
+  [[ "$data_path" != / ]] || { printf 'Choose a data directory below the filesystem root.\n' >&2; exit 2; }
+  if [[ "$data_path" == "$config_path" || "$config_path" == "$data_path/"* || "$data_path" == "$config_path/"* ]]; then
+    printf 'The data and application-config directories must be separate and must not contain one another.\n' >&2
+    exit 2
+  fi
   puid=$(id -u); pgid=$(id -g)
   umask 077
   {
-    printf 'MEDIA_ROOT=%s\n' "$(env_quote "$media_path")"
-    printf 'DOWNLOADS_ROOT=%s\n' "$(env_quote "$downloads_path")"
+    printf 'DATA_ROOT=%s\n' "$(env_quote "$data_path")"
     printf 'CONFIG_ROOT=%s\n' "$(env_quote "$config_path")"
     printf 'PUID=%s\nPGID=%s\nTZ=%s\n' "$puid" "$pgid" "$(env_quote "$timezone")"
     printf 'COMPOSE_PROFILES=%s\n' "$(env_quote "$network_mode")"

@@ -12,7 +12,7 @@ A portable Docker Compose stack for automated media organization and playback. I
 1. Install and start Docker Desktop.
 2. Download this repository with **Code → Download ZIP**, then extract it.
 3. Double-click **`Install-ServarrStack.cmd`**.
-4. Choose the folders and connection mode. If VPN protection is selected, enter the VPN settings. Select **Install**.
+4. Choose one shared data folder, a separate application-config folder, and the connection mode. If VPN protection is selected, enter the VPN settings. Select **Install**.
 
 The graphical installer displays progress and errors, preserves existing `.env` and application data when rerun, and opens Jellyfin setup after a successful installation. Windows may show a standard warning because this community script is not code-signed; its complete source is included as `windows-installer.ps1`.
 
@@ -35,9 +35,9 @@ chmod +x install.sh
 ./install.sh
 ```
 
-The graphical Windows installer, PowerShell engine, and Linux installer prompt for media, download, config, and VPN settings; create directories and a private `.env`; validate Compose; pull images; and start the stack. Rerunning an installer reuses `.env` and existing data without deleting or overwriting it.
+The graphical Windows installer, PowerShell engine, and Linux installer prompt for a shared data root, a separate config root, and VPN settings; create directories; prove the selected data root can hardlink between downloads and media; create a private `.env`; validate Compose; pull images; and start the stack. Rerunning an installer reuses `.env` and existing data without deleting or overwriting it.
 
-The folder fields are prefilled with recommended locations. VPN protection is selected by default, but users without a VPN can choose direct mode after acknowledging the public-IP warning. After the first start, the installer displays qBittorrent's temporary login when one is available and opens Jellyfin's first-run setup.
+The folder fields are prefilled with a hardlink-compatible layout. VPN protection is selected by default, but users without a VPN can choose direct mode after acknowledging the public-IP warning. After the first start, the installer displays qBittorrent's temporary login when one is available and opens Jellyfin's first-run setup.
 
 For non-interactive examples, run `Get-Help .\install.ps1 -Detailed` or `./install.sh --help`. On Linux, pass `--without-vpn` to select direct mode. Use `-NoLaunch` (Windows) or `--no-launch` (Linux) to create and validate the configuration without pulling or starting containers.
 
@@ -55,19 +55,19 @@ On Windows, share the selected drives with Docker Desktop if prompted. Linux use
 
 ## Folder layout
 
-The defaults keep runtime data below the clone, but every root is configurable:
+The defaults keep runtime data below the clone, but both roots are configurable. Downloads and organized media intentionally live beneath one data root:
 
 ```text
 servarr-stack/
+├── config/
+│   ├── gluetun/
+│   ├── qbittorrent/
+│   ├── prowlarr/
+│   ├── sonarr/
+│   ├── radarr/
+│   ├── jellyfin/
+│   └── seerr/
 ├── data/
-│   ├── config/
-│   │   ├── gluetun/
-│   │   ├── qbittorrent/
-│   │   ├── prowlarr/
-│   │   ├── sonarr/
-│   │   ├── radarr/
-│   │   ├── jellyfin/
-│   │   └── seerr/
 │   ├── downloads/
 │   │   ├── complete/
 │   │   └── incomplete/
@@ -78,7 +78,15 @@ servarr-stack/
 └── docker-compose.yml
 ```
 
-Inside qBittorrent, Sonarr, and Radarr, downloads are always `/downloads`. Inside Sonarr, Radarr, and Jellyfin, organized media is always `/media`. Those consistent container paths avoid remote-path mappings and let imports work regardless of host path syntax. Hardlinks require downloads and media to be on the same underlying filesystem; otherwise imports use copies.
+qBittorrent, Sonarr, and Radarr all receive the same host data root as one `/data` bind mount. Use `/data/downloads` for downloads, `/data/media/tv` for Sonarr, and `/data/media/movies` for Radarr. This single-mount layout allows Sonarr and Radarr to hardlink completed files instead of making a second full copy. Jellyfin receives only the organized `data/media` subtree as `/media`.
+
+Hardlinks still require a host filesystem that supports them. Keep `data/downloads` and `data/media` together under the selected local data root; do not replace either one with a separate disk, network share, or independent Docker mount. Moving or deleting one hardlink does not delete the file data while another link remains.
+
+### Migrating from the older separate-folder layout
+
+Older releases used separate `MEDIA_ROOT` and `DOWNLOADS_ROOT` mounts, which cannot reliably hardlink across the container mount boundary. The installers deliberately refuse to rewrite that existing `.env` automatically because moving a media library is a data-sensitive operation.
+
+Back up `.env` and the application config root, stop that stack, and choose a new local data root with `downloads` and `media` subfolders. Copy—not delete—the old downloads and media into those subfolders, replace `MEDIA_ROOT` and `DOWNLOADS_ROOT` in `.env` with one `DATA_ROOT`, then recreate the stack. Update the application paths to the `/data/...` values below and verify imports and playback before removing the old copies. Existing duplicated files are not retroactively converted; new imports can use hardlinks.
 
 ## Service URLs
 
@@ -127,9 +135,9 @@ Compare that last address with your normal public address. In VPN mode, `qbittor
 
 ## First-time application setup
 
-1. **qBittorrent:** Open port 8080. The installer displays the temporary admin password when available. To retrieve it later, run `docker compose logs qbittorrent-vpn` in VPN mode or `docker compose logs qbittorrent` in direct mode. Sign in, change the password, set the default save path to `/downloads/complete`, and set the incomplete path to `/downloads/incomplete`. Keep the Web UI port at `8080` inside the container.
-2. **Sonarr:** Add `/media/tv` as the root folder. Under **Settings → Download Clients**, add qBittorrent with port `8080` and its Web UI credentials. Use host `gluetun` in VPN mode or `qbittorrent` in direct mode. Use category `tv`.
-3. **Radarr:** Add `/media/movies` as the root folder. Add the same qBittorrent endpoint—`gluetun:8080` in VPN mode or `qbittorrent:8080` in direct mode—with category `movies`.
+1. **qBittorrent:** Open port 8080. The installer displays the temporary admin password when available. To retrieve it later, run `docker compose logs qbittorrent-vpn` in VPN mode or `docker compose logs qbittorrent` in direct mode. Sign in, change the password, set the default save path to `/data/downloads/complete`, and set the incomplete path to `/data/downloads/incomplete`. Keep the Web UI port at `8080` inside the container.
+2. **Sonarr:** Add `/data/media/tv` as the root folder. Under **Settings → Download Clients**, add qBittorrent with port `8080` and its Web UI credentials. Use host `gluetun` in VPN mode or `qbittorrent` in direct mode. Use category `tv`.
+3. **Radarr:** Add `/data/media/movies` as the root folder. Add the same qBittorrent endpoint—`gluetun:8080` in VPN mode or `qbittorrent:8080` in direct mode—with category `movies`.
 4. **Prowlarr:** Add only indexers you are authorized to use. Under **Settings → Apps**, add Sonarr at `http://sonarr:8989` and Radarr at `http://radarr:7878`, using the API keys displayed in each app under **Settings → General**.
 5. **Jellyfin:** Create a new local administrator, then add a Shows library at `/media/tv` and a Movies library at `/media/movies`. Do not expose Jellyfin directly to the internet without authentication and a properly configured reverse proxy.
 6. **Seerr:** Connect Jellyfin at `http://jellyfin:8096`, then connect Sonarr and Radarr using their internal service URLs and API keys.
@@ -210,7 +218,7 @@ In VPN mode, Gluetun must be healthy because it owns port 8080 and qBittorrent's
 
 ### Imports fail or create duplicate copies
 
-Use `/downloads` in qBittorrent, Sonarr, and Radarr. Use `/media/tv` and `/media/movies` as root folders. Do not enter host paths such as drive letters in an application UI. Hardlinks work only when the download and media roots are on the same filesystem and permissions allow them; separate disks or shares require copying.
+Use `/data/downloads` in qBittorrent, Sonarr, and Radarr. Use `/data/media/tv` and `/data/media/movies` as the Sonarr and Radarr root folders. Do not enter host paths such as drive letters in an application UI. Enable **Use Hardlinks instead of Copy** under **Settings → Media Management** in Sonarr and Radarr. If imports still copy, confirm the source and destination both begin with `/data`, the host data root is a local hardlink-capable filesystem, and permissions allow link creation.
 
 ### Jellyfin cannot see imported media
 
