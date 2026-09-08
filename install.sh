@@ -9,6 +9,7 @@ config_path=""
 timezone="Etc/UTC"
 vpn_provider=""
 vpn_type="openvpn"
+network_mode="vpn"
 openvpn_user=""
 openvpn_password=""
 wireguard_private_key=""
@@ -19,7 +20,7 @@ no_launch=false
 usage() {
   printf '%s\n' "Usage: ./install.sh [--media PATH] [--downloads PATH] [--config PATH]" \
     "  [--vpn-provider NAME] [--vpn-type openvpn|wireguard] [--timezone ZONE]" \
-    "  [--non-interactive] [--no-launch]"
+    "  [--without-vpn] [--non-interactive] [--no-launch]"
 }
 
 while (($#)); do
@@ -34,6 +35,7 @@ while (($#)); do
     --openvpn-password) openvpn_password=${2:?Missing value}; shift 2 ;;
     --wireguard-private-key) wireguard_private_key=${2:?Missing value}; shift 2 ;;
     --wireguard-addresses) wireguard_addresses=${2:?Missing value}; shift 2 ;;
+    --without-vpn) network_mode="direct"; shift ;;
     --non-interactive) non_interactive=true; shift ;;
     --no-launch) no_launch=true; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -75,17 +77,34 @@ env_quote() {
 
 if [[ -f "$env_file" ]]; then
   printf 'Using the existing .env. No values or data were overwritten.\n'
+  saved_profile=$(sed -n 's/^COMPOSE_PROFILES=//p' "$env_file" | tail -n 1)
+  saved_profile=${saved_profile#\'}; saved_profile=${saved_profile%\'}; saved_profile=${saved_profile#\"}; saved_profile=${saved_profile%\"}
+  if [[ -n "$saved_profile" ]]; then
+    network_mode=$saved_profile
+  else
+    printf "COMPOSE_PROFILES='vpn'\n" >>"$env_file"
+    network_mode="vpn"
+    printf 'Added the new VPN profile setting to the existing .env; all prior values were preserved.\n'
+  fi
+  [[ "$network_mode" == vpn || "$network_mode" == direct ]] || {
+    printf 'COMPOSE_PROFILES in .env must be vpn or direct.\n' >&2; exit 2;
+  }
 else
   media_path=$(prompt "Media directory" "$media_path" "$stack_root/data/media")
   downloads_path=$(prompt "Downloads directory" "$downloads_path" "$stack_root/data/downloads")
   config_path=$(prompt "Application config directory" "$config_path" "$stack_root/data/config")
-  vpn_provider=$(prompt "Gluetun VPN provider identifier" "$vpn_provider" "your-provider")
-  if [[ "$vpn_type" == openvpn ]]; then
-    openvpn_user=$(prompt "OpenVPN service username" "$openvpn_user" "")
-    openvpn_password=$(prompt_secret "OpenVPN service password" "$openvpn_password")
+  if [[ "$network_mode" == vpn ]]; then
+    vpn_provider=$(prompt "Gluetun VPN provider identifier" "$vpn_provider" "your-provider")
+    if [[ "$vpn_type" == openvpn ]]; then
+      openvpn_user=$(prompt "OpenVPN service username" "$openvpn_user" "")
+      openvpn_password=$(prompt_secret "OpenVPN service password" "$openvpn_password")
+    else
+      wireguard_private_key=$(prompt_secret "WireGuard private key" "$wireguard_private_key")
+      wireguard_addresses=$(prompt "WireGuard address (for example 10.0.0.2/32)" "$wireguard_addresses" "")
+    fi
   else
-    wireguard_private_key=$(prompt_secret "WireGuard private key" "$wireguard_private_key")
-    wireguard_addresses=$(prompt "WireGuard address (for example 10.0.0.2/32)" "$wireguard_addresses" "")
+    vpn_provider="not-configured"
+    printf '\nWARNING: DIRECT MODE ENABLED. qBittorrent traffic will not use a VPN, and torrent peers can see this connection\x27s public IP address.\n\n' >&2
   fi
 
   mkdir -p -- "$media_path" "$downloads_path" "$config_path"
@@ -103,6 +122,7 @@ else
     printf 'DOWNLOADS_ROOT=%s\n' "$(env_quote "$downloads_path")"
     printf 'CONFIG_ROOT=%s\n' "$(env_quote "$config_path")"
     printf 'PUID=%s\nPGID=%s\nTZ=%s\n' "$puid" "$pgid" "$(env_quote "$timezone")"
+    printf 'COMPOSE_PROFILES=%s\n' "$(env_quote "$network_mode")"
     printf 'VPN_SERVICE_PROVIDER=%s\nVPN_TYPE=%s\nSERVER_COUNTRIES=\x27\x27\n' "$(env_quote "$vpn_provider")" "$(env_quote "$vpn_type")"
     printf 'OPENVPN_USER=%s\nOPENVPN_PASSWORD=%s\n' "$(env_quote "$openvpn_user")" "$(env_quote "$openvpn_password")"
     printf 'WIREGUARD_PRIVATE_KEY=%s\nWIREGUARD_ADDRESSES=%s\n' "$(env_quote "$wireguard_private_key")" "$(env_quote "$wireguard_addresses")"
@@ -112,13 +132,13 @@ else
   printf 'Created %s. Keep it private.\n' "$env_file"
 fi
 
-docker compose --env-file "$env_file" -f "$stack_root/docker-compose.yml" config --quiet
+docker compose --profile "$network_mode" --env-file "$env_file" -f "$stack_root/docker-compose.yml" config --quiet
 if $no_launch; then
   printf 'Validation complete; --no-launch prevented pulls and container changes.\n'
   exit 0
 fi
-docker compose --env-file "$env_file" -f "$stack_root/docker-compose.yml" pull
-docker compose --env-file "$env_file" -f "$stack_root/docker-compose.yml" up -d
+docker compose --profile "$network_mode" --env-file "$env_file" -f "$stack_root/docker-compose.yml" pull
+docker compose --profile "$network_mode" --env-file "$env_file" -f "$stack_root/docker-compose.yml" up -d
 
 env_port() {
   local name=$1 default=$2 value

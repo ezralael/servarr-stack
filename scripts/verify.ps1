@@ -12,39 +12,49 @@ function Assert-True {
     Write-Host "PASS: $Message"
 }
 
-docker compose --env-file $example -f $compose config --quiet
-Assert-True ($LASTEXITCODE -eq 0) "Compose resolves with .env.example"
-$resolved = docker compose --env-file $example -f $compose config --format json | ConvertFrom-Json
-Assert-True ($LASTEXITCODE -eq 0) "Resolved Compose JSON is readable"
+docker compose --profile vpn --env-file $example -f $compose config --quiet
+Assert-True ($LASTEXITCODE -eq 0) "VPN Compose profile resolves with .env.example"
+$vpnResolved = docker compose --profile vpn --env-file $example -f $compose config --format json | ConvertFrom-Json
+Assert-True ($LASTEXITCODE -eq 0) "VPN profile JSON is readable"
+$directResolved = docker compose --profile direct --env-file $example -f $compose config --format json | ConvertFrom-Json
+Assert-True ($LASTEXITCODE -eq 0) "Direct profile JSON is readable"
 
-$qb = $resolved.services.qbittorrent
-$gt = $resolved.services.gluetun
-Assert-True ($qb.network_mode -eq "service:gluetun") "qBittorrent shares Gluetun's network namespace"
-Assert-True (-not $qb.PSObject.Properties["ports"]) "qBittorrent publishes no ports directly"
-Assert-True ($qb.depends_on.gluetun.condition -eq "service_healthy") "qBittorrent waits for healthy Gluetun"
+$qb = $vpnResolved.services.'qbittorrent-vpn'
+$directQb = $directResolved.services.qbittorrent
+$gt = $vpnResolved.services.gluetun
+Assert-True ($qb.network_mode -eq "service:gluetun") "VPN qBittorrent shares Gluetun's network namespace"
+Assert-True (-not $qb.PSObject.Properties["ports"]) "VPN qBittorrent publishes no ports directly"
+Assert-True ($qb.depends_on.gluetun.condition -eq "service_healthy") "VPN qBittorrent waits for healthy Gluetun"
 Assert-True ($gt.cap_add -contains "NET_ADMIN") "Gluetun has NET_ADMIN"
 Assert-True (@($gt.ports | Where-Object { $_.target -eq 8080 }).Count -eq 1) "Gluetun publishes qBittorrent Web UI"
+Assert-True (-not $directResolved.services.PSObject.Properties["gluetun"]) "Direct profile does not start Gluetun"
+Assert-True ($directQb.network_mode -ne "service:gluetun") "Direct qBittorrent has an independent network"
+Assert-True (@($directQb.ports | Where-Object { $_.target -eq 8080 }).Count -eq 1) "Direct qBittorrent publishes its Web UI"
 
-foreach ($service in @("qbittorrent", "sonarr", "radarr")) {
-    $targets = @($resolved.services.$service.volumes | ForEach-Object { $_.target })
+foreach ($service in @("qbittorrent-vpn", "sonarr", "radarr")) {
+    $targets = @($vpnResolved.services.$service.volumes | ForEach-Object { $_.target })
     Assert-True ($targets -contains "/downloads") "$service has the shared /downloads path"
 }
-foreach ($service in @("qbittorrent", "sonarr", "radarr", "jellyfin")) {
-    $targets = @($resolved.services.$service.volumes | ForEach-Object { $_.target })
+Assert-True (@($directQb.volumes | ForEach-Object { $_.target }) -contains "/downloads") "direct qBittorrent has the shared /downloads path"
+foreach ($service in @("qbittorrent-vpn", "sonarr", "radarr", "jellyfin")) {
+    $targets = @($vpnResolved.services.$service.volumes | ForEach-Object { $_.target })
     Assert-True ($targets -contains "/media") "$service has the shared /media path"
 }
-foreach ($service in @("gluetun", "qbittorrent", "prowlarr", "sonarr", "radarr", "jellyfin", "seerr")) {
-    Assert-True ($resolved.services.$service.restart -eq "unless-stopped") "$service is restart-safe"
+Assert-True (@($directQb.volumes | ForEach-Object { $_.target }) -contains "/media") "direct qBittorrent has the shared /media path"
+foreach ($service in @("gluetun", "qbittorrent-vpn", "prowlarr", "sonarr", "radarr", "jellyfin", "seerr")) {
+    Assert-True ($vpnResolved.services.$service.restart -eq "unless-stopped") "$service is restart-safe"
 }
 $configTargets = @{
-    gluetun = "/gluetun"; qbittorrent = "/config"; prowlarr = "/config";
+    gluetun = "/gluetun"; 'qbittorrent-vpn' = "/config"; prowlarr = "/config";
     sonarr = "/config"; radarr = "/config"; jellyfin = "/config"; seerr = "/app/config"
 }
 foreach ($service in $configTargets.Keys) {
-    $configMount = @($resolved.services.$service.volumes | Where-Object { $_.target -eq $configTargets[$service] })
+    $configMount = @($vpnResolved.services.$service.volumes | Where-Object { $_.target -eq $configTargets[$service] })
     Assert-True ($configMount.Count -eq 1 -and $configMount[0].type -eq "bind") "$service configuration is a persistent bind mount"
 }
-$jellyfinCache = @($resolved.services.jellyfin.volumes | Where-Object { $_.target -eq "/cache" })
+$directConfig = @($directQb.volumes | Where-Object { $_.target -eq "/config" })
+Assert-True ($directConfig.Count -eq 1 -and $directConfig[0].type -eq "bind") "direct qBittorrent configuration is a persistent bind mount"
+$jellyfinCache = @($vpnResolved.services.jellyfin.volumes | Where-Object { $_.target -eq "/cache" })
 Assert-True ($jellyfinCache.Count -eq 1 -and $jellyfinCache[0].type -eq "volume") "Jellyfin cache uses an explicit persistent volume"
 
 $required = @(

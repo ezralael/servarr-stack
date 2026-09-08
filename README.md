@@ -1,6 +1,6 @@
 # Servarr Stack
 
-A portable Docker Compose stack for automated media organization and playback. It runs qBittorrent inside Gluetun's VPN network namespace, with Prowlarr, Sonarr, Radarr, Jellyfin, and Seerr on a private Compose network.
+A portable Docker Compose stack for automated media organization and playback. It can route qBittorrent through Gluetun's VPN network namespace (recommended) or run qBittorrent directly, with Prowlarr, Sonarr, Radarr, Jellyfin, and Seerr on a private Compose network.
 
 > [!WARNING]
 > You are responsible for complying with copyright law, your VPN provider's terms, indexer rules, and all other laws that apply where you live. This project does not provide media, indexers, or VPN access.
@@ -12,7 +12,7 @@ A portable Docker Compose stack for automated media organization and playback. I
 1. Install and start Docker Desktop.
 2. Download this repository with **Code → Download ZIP**, then extract it.
 3. Double-click **`Install-ServarrStack.cmd`**.
-4. Choose the media, downloads, and application-config folders; enter the VPN settings; and select **Install**.
+4. Choose the folders and connection mode. If VPN protection is selected, enter the VPN settings. Select **Install**.
 
 The graphical installer displays progress and errors, preserves existing `.env` and application data when rerun, and opens Jellyfin setup after a successful installation. Windows may show a standard warning because this community script is not code-signed; its complete source is included as `windows-installer.ps1`.
 
@@ -37,16 +37,16 @@ chmod +x install.sh
 
 The graphical Windows installer, PowerShell engine, and Linux installer prompt for media, download, config, and VPN settings; create directories and a private `.env`; validate Compose; pull images; and start the stack. Rerunning an installer reuses `.env` and existing data without deleting or overwriting it.
 
-The folder fields are prefilled with recommended locations, so most Windows users only need to select their VPN provider and enter its manual/service credentials. After the first start, the installer displays qBittorrent's temporary login when one is available and opens Jellyfin's first-run setup.
+The folder fields are prefilled with recommended locations. VPN protection is selected by default, but users without a VPN can choose direct mode after acknowledging the public-IP warning. After the first start, the installer displays qBittorrent's temporary login when one is available and opens Jellyfin's first-run setup.
 
-For non-interactive examples, run `Get-Help .\install.ps1 -Detailed` or `./install.sh --help`. Use `-NoLaunch` (Windows) or `--no-launch` (Linux) to create and validate the configuration without pulling or starting containers.
+For non-interactive examples, run `Get-Help .\install.ps1 -Detailed` or `./install.sh --help`. On Linux, pass `--without-vpn` to select direct mode. Use `-NoLaunch` (Windows) or `--no-launch` (Linux) to create and validate the configuration without pulling or starting containers.
 
 ## Requirements
 
 - A 64-bit Windows 10/11 or modern Linux host
 - Docker Desktop on Windows, or Docker Engine plus Docker Compose v2 on Linux
 - Git for the quick-start commands
-- A paid or free VPN account supported by Gluetun
+- Optional but recommended: a VPN account supported by Gluetun
 - At least 4 GB RAM available to Docker; 8 GB or more is recommended
 - Several GB of free space for images/configuration, plus storage sized for your media
 - For Jellyfin transcoding, a capable CPU or supported GPU; this baseline Compose file uses CPU transcoding for portability
@@ -84,25 +84,35 @@ Inside qBittorrent, Sonarr, and Radarr, downloads are always `/downloads`. Insid
 
 | Service | Default local URL | Purpose |
 |---|---|---|
-| qBittorrent | <http://localhost:8080> | Download client; port is published by Gluetun |
+| qBittorrent | <http://localhost:8080> | Download client; port is published by Gluetun in VPN mode or qBittorrent in direct mode |
 | Prowlarr | <http://localhost:9696> | Indexer manager |
 | Sonarr | <http://localhost:8989> | TV library automation |
 | Radarr | <http://localhost:7878> | Movie library automation |
 | Jellyfin | <http://localhost:8096> | Media server |
 | Seerr | <http://localhost:5055> | Media requests and discovery |
 
-Gluetun has no Web UI. Check its status with `docker compose ps` and `docker compose logs gluetun`.
+Gluetun has no Web UI and runs only in VPN mode. Check its status with `docker compose ps` and `docker compose logs gluetun`.
 
-## VPN configuration
+## Connection modes and VPN configuration
 
-The installer writes credentials only to the ignored local `.env`. To configure by hand, copy `.env.example` to `.env` and follow the [Gluetun provider setup guide](https://github.com/qdm12/gluetun-wiki/tree/main/setup/providers).
+> [!CAUTION]
+> **Direct mode does not hide your public IP address from torrent peers.** A VPN is not legally required for lawful downloads, but direct mode provides less network privacy. A VPN does not make unlawful activity lawful and does not guarantee anonymity. Never expose qBittorrent's Web UI directly to the internet.
+
+The installer offers two mutually exclusive modes:
+
+- **VPN mode (recommended):** starts Gluetun and runs `qbittorrent-vpn` inside Gluetun's network namespace. Gluetun owns the host ports and blocks qBittorrent from bypassing the tunnel.
+- **Direct mode:** does not start Gluetun. The `qbittorrent` service uses the normal Compose network and publishes its own ports.
+
+The selected mode is stored locally as `COMPOSE_PROFILES=vpn` or `COMPOSE_PROFILES=direct`, so ordinary commands such as `docker compose up -d` continue using that choice. Do not activate both profiles simultaneously because both qBittorrent services share the same configuration and host ports.
+
+In VPN mode, the installer writes credentials only to the ignored local `.env`. To configure by hand, copy `.env.example` to `.env` and follow the [Gluetun provider setup guide](https://github.com/qdm12/gluetun-wiki/tree/main/setup/providers).
 
 For OpenVPN, set `VPN_SERVICE_PROVIDER`, `VPN_TYPE=openvpn`, `OPENVPN_USER`, and `OPENVPN_PASSWORD`. Many providers issue separate service credentials; your website login may not work. For WireGuard, set `VPN_TYPE=wireguard`, `WIREGUARD_PRIVATE_KEY`, and `WIREGUARD_ADDRESSES`. Some providers also need `SERVER_COUNTRIES` or provider-specific variables; add only the variables documented by Gluetun to the `gluetun.environment` section and keep their values in `.env`.
 
 Never commit `.env`, `.ovpn` files, WireGuard configurations, private keys, or provider credentials. After editing VPN settings, apply them with:
 
 ```console
-docker compose up -d --force-recreate gluetun qbittorrent
+docker compose up -d --force-recreate gluetun qbittorrent-vpn
 ```
 
 Confirm the VPN before adding downloads:
@@ -110,16 +120,16 @@ Confirm the VPN before adding downloads:
 ```console
 docker compose ps
 docker compose logs --tail 100 gluetun
-docker compose exec qbittorrent sh -c "wget -qO- https://ipinfo.io/ip"
+docker compose exec qbittorrent-vpn sh -c "wget -qO- https://ipinfo.io/ip"
 ```
 
-Compare that last address with your normal public address. qBittorrent cannot create its own network route in this stack: it uses `network_mode: service:gluetun`, has no `ports` block, and starts only after Gluetun is healthy.
+Compare that last address with your normal public address. In VPN mode, `qbittorrent-vpn` cannot create its own network route: it uses `network_mode: service:gluetun`, has no `ports` block, and starts only after Gluetun is healthy.
 
 ## First-time application setup
 
-1. **qBittorrent:** Open port 8080. Find the temporary admin password in `docker compose logs qbittorrent`, sign in, and change it. Set the default save path to `/downloads/complete` and incomplete path to `/downloads/incomplete`. Keep the Web UI port at `8080` inside the container.
-2. **Sonarr:** Add `/media/tv` as the root folder. Under **Settings → Download Clients**, add qBittorrent with host `gluetun`, port `8080`, and its Web UI credentials. Use category `tv`.
-3. **Radarr:** Add `/media/movies` as the root folder. Add the same qBittorrent endpoint (`gluetun:8080`) with category `movies`.
+1. **qBittorrent:** Open port 8080. The installer displays the temporary admin password when available. To retrieve it later, run `docker compose logs qbittorrent-vpn` in VPN mode or `docker compose logs qbittorrent` in direct mode. Sign in, change the password, set the default save path to `/downloads/complete`, and set the incomplete path to `/downloads/incomplete`. Keep the Web UI port at `8080` inside the container.
+2. **Sonarr:** Add `/media/tv` as the root folder. Under **Settings → Download Clients**, add qBittorrent with port `8080` and its Web UI credentials. Use host `gluetun` in VPN mode or `qbittorrent` in direct mode. Use category `tv`.
+3. **Radarr:** Add `/media/movies` as the root folder. Add the same qBittorrent endpoint—`gluetun:8080` in VPN mode or `qbittorrent:8080` in direct mode—with category `movies`.
 4. **Prowlarr:** Add only indexers you are authorized to use. Under **Settings → Apps**, add Sonarr at `http://sonarr:8989` and Radarr at `http://radarr:7878`, using the API keys displayed in each app under **Settings → General**.
 5. **Jellyfin:** Create a new local administrator, then add a Shows library at `/media/tv` and a Movies library at `/media/movies`. Do not expose Jellyfin directly to the internet without authentication and a properly configured reverse proxy.
 6. **Seerr:** Connect Jellyfin at `http://jellyfin:8096`, then connect Sonarr and Radarr using their internal service URLs and API keys.
@@ -128,9 +138,19 @@ API keys remain in each application's ignored config directory. They are never p
 
 ## Networking and VPN isolation
 
-Compose creates one private bridge network for Gluetun, Prowlarr, Sonarr, Radarr, Jellyfin, and Seerr. Those services resolve one another by service name. qBittorrent is different: `network_mode: service:gluetun` makes it share Gluetun's network namespace. It gets no separate IP, no separate default route, and no direct host port publishing. Ports 8080 and 6881 are published on Gluetun instead. Gluetun's firewall blocks non-VPN egress and the health-gated dependency prevents qBittorrent from starting before the tunnel is healthy.
+Compose creates one private bridge network for Prowlarr, Sonarr, Radarr, Jellyfin, and Seerr. Those services resolve one another by service name. In VPN mode, qBittorrent shares Gluetun's network namespace, gets no separate IP or route, and publishes no ports itself; Gluetun publishes ports 8080 and 6881 and its firewall blocks non-VPN egress. In direct mode, Gluetun is inactive and qBittorrent joins the private bridge network as `qbittorrent` while publishing those ports itself.
 
-Prowlarr and the media managers do not need the VPN for normal operation and retain direct networking. If your threat model requires more services behind the VPN, review Gluetun's firewall rules and DNS behavior before changing the topology.
+Prowlarr and the media managers retain direct networking in both modes. Switching modes later requires updating the qBittorrent hostname in Sonarr and Radarr as described above.
+
+### Switch connection mode later
+
+Stop the current profile before changing modes so two qBittorrent containers never use the same config or ports. For example, to change from VPN to direct mode:
+
+```console
+docker compose --profile vpn down
+```
+
+Change `COMPOSE_PROFILES=vpn` to `COMPOSE_PROFILES=direct` in `.env`, then run `docker compose up -d`. To switch back, run `docker compose --profile direct down`, restore `COMPOSE_PROFILES=vpn`, and run `docker compose up -d`. Finally, change the qBittorrent host in Sonarr and Radarr to `qbittorrent` for direct mode or `gluetun` for VPN mode. These commands preserve the mounted application data, media, and downloads.
 
 ## Operations
 
@@ -182,11 +202,11 @@ On Linux, confirm `PUID=$(id -u)` and `PGID=$(id -g)` in `.env`, then ensure tha
 
 ### Gluetun is unhealthy
 
-Run `docker compose logs --tail 200 gluetun`. Common causes are an unsupported provider identifier, website credentials instead of VPN service credentials, an incomplete WireGuard address, an unavailable country filter, incorrect system time, or a host firewall blocking the VPN protocol. Correct `.env`, then run `docker compose up -d --force-recreate gluetun qbittorrent`. Do not remove qBittorrent's shared network mode as a workaround.
+In VPN mode, run `docker compose logs --tail 200 gluetun`. Common causes are an unsupported provider identifier, website credentials instead of VPN service credentials, an incomplete WireGuard address, an unavailable country filter, incorrect system time, or a host firewall blocking the VPN protocol. Correct `.env`, then run `docker compose up -d --force-recreate gluetun qbittorrent-vpn`.
 
 ### qBittorrent Web UI is unreachable or has no connectivity
 
-Gluetun must be healthy because it owns port 8080 and qBittorrent's network. Check `docker compose ps`, then inspect both containers' logs. Make sure no other host process uses the configured Web UI port. Within Sonarr/Radarr, the qBittorrent host is `gluetun`, not `localhost` or `qbittorrent`. If the UI opens but torrents stall, verify the VPN endpoint, provider port-forwarding policy, and that qBittorrent's listening port matches `TORRENTING_PORT`.
+In VPN mode, Gluetun must be healthy because it owns port 8080 and qBittorrent's network. Check `docker compose ps`, then inspect both containers' logs. In direct mode, Gluetun should not be running. Make sure no other host process uses the configured Web UI port. Within Sonarr/Radarr, use host `gluetun` for VPN mode or `qbittorrent` for direct mode—never `localhost`. If the UI opens but torrents stall, verify the selected mode and that qBittorrent's listening port matches `TORRENTING_PORT`.
 
 ### Imports fail or create duplicate copies
 
@@ -203,7 +223,7 @@ Change the corresponding value in `.env` (for example `SONARR_PORT=8990`) and ru
 ## Security notes
 
 - The service Web UIs bind to all host interfaces by default. Use host firewall rules, authentication, or a secure reverse proxy before allowing access beyond a trusted LAN.
-- Never publish qBittorrent directly or add a network to it; doing so can create a VPN bypass.
+- Do not forward qBittorrent's Web UI port through your router or expose it directly to the internet.
 - Keep Docker, images, and the host operating system updated.
 - Backups of `.env` and `CONFIG_ROOT` contain secrets and personal application data.
 

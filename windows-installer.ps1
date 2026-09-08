@@ -83,7 +83,7 @@ $title.Size = [Drawing.Size]::new(500, 38)
 $form.Controls.Add($title)
 
 $intro = [Windows.Forms.Label]::new()
-$intro.Text = "Configure persistent storage and the VPN. The installer validates Docker, pulls images, and starts the stack without deleting existing data."
+$intro.Text = "Choose storage and whether qBittorrent should use a VPN. The installer validates Docker, pulls images, and starts the stack without deleting existing data."
 $intro.Location = [Drawing.Point]::new(21, 55)
 $intro.Size = [Drawing.Size]::new(710, 42)
 $form.Controls.Add($intro)
@@ -93,9 +93,26 @@ $mediaField = Add-TextField $form "Media directory" 110 (Join-Path $defaultData 
 $downloadsField = Add-TextField $form "Downloads directory" 150 (Join-Path $defaultData "downloads") -Browse
 $configField = Add-TextField $form "Application config directory" 190 (Join-Path $defaultData "config") -Browse
 
+$useVpn = [Windows.Forms.CheckBox]::new()
+$useVpn.Text = "Route qBittorrent through a VPN (recommended)"
+$useVpn.Checked = $true
+$useVpn.Font = [Drawing.Font]::new("Segoe UI Semibold", 9)
+$useVpn.Location = [Drawing.Point]::new(22, 225)
+$useVpn.Size = [Drawing.Size]::new(330, 28)
+$form.Controls.Add($useVpn)
+
+$directWarning = [Windows.Forms.Label]::new()
+$directWarning.Text = "WARNING: Without a VPN, torrent peers can see your public IP address."
+$directWarning.Font = [Drawing.Font]::new("Segoe UI Semibold", 9)
+$directWarning.ForeColor = [Drawing.Color]::DarkRed
+$directWarning.Location = [Drawing.Point]::new(355, 229)
+$directWarning.Size = [Drawing.Size]::new(375, 25)
+$directWarning.Visible = $false
+$form.Controls.Add($directWarning)
+
 $vpnGroup = [Windows.Forms.GroupBox]::new()
-$vpnGroup.Text = "VPN connection (required for qBittorrent)"
-$vpnGroup.Location = [Drawing.Point]::new(18, 230)
+$vpnGroup.Text = "VPN connection"
+$vpnGroup.Location = [Drawing.Point]::new(18, 258)
 $vpnGroup.Size = [Drawing.Size]::new(714, 245)
 $form.Controls.Add($vpnGroup)
 
@@ -180,41 +197,46 @@ $setCredentialLabels = {
 $typeField.Add_SelectedIndexChanged($setCredentialLabels)
 & $setCredentialLabels
 
+$useVpn.Add_CheckedChanged({
+    $vpnGroup.Enabled = $useVpn.Checked
+    $directWarning.Visible = -not $useVpn.Checked
+})
+
 $validateOnly = [Windows.Forms.CheckBox]::new()
 $validateOnly.Text = "Validate only (do not pull images or start containers)"
-$validateOnly.Location = [Drawing.Point]::new(22, 490)
+$validateOnly.Location = [Drawing.Point]::new(22, 515)
 $validateOnly.Size = [Drawing.Size]::new(360, 24)
 $form.Controls.Add($validateOnly)
 
 $openJellyfin = [Windows.Forms.CheckBox]::new()
 $openJellyfin.Text = "Open Jellyfin setup when installation finishes"
 $openJellyfin.Checked = $true
-$openJellyfin.Location = [Drawing.Point]::new(390, 490)
+$openJellyfin.Location = [Drawing.Point]::new(390, 515)
 $openJellyfin.Size = [Drawing.Size]::new(340, 24)
 $form.Controls.Add($openJellyfin)
 
 $existingNotice = [Windows.Forms.Label]::new()
-$existingNotice.Location = [Drawing.Point]::new(22, 520)
+$existingNotice.Location = [Drawing.Point]::new(22, 545)
 $existingNotice.Size = [Drawing.Size]::new(710, 34)
 $existingNotice.ForeColor = [Drawing.Color]::FromArgb(120, 70, 0)
 $form.Controls.Add($existingNotice)
 
 $progress = [Windows.Forms.ProgressBar]::new()
-$progress.Location = [Drawing.Point]::new(22, 560)
+$progress.Location = [Drawing.Point]::new(22, 585)
 $progress.Size = [Drawing.Size]::new(558, 25)
 $progress.Style = "Blocks"
 $form.Controls.Add($progress)
 
 $installButton = [Windows.Forms.Button]::new()
 $installButton.Text = "Install"
-$installButton.Location = [Drawing.Point]::new(595, 556)
+$installButton.Location = [Drawing.Point]::new(595, 581)
 $installButton.Size = [Drawing.Size]::new(135, 34)
 $form.AcceptButton = $installButton
 $form.Controls.Add($installButton)
 
 $outputBox = [Windows.Forms.TextBox]::new()
-$outputBox.Location = [Drawing.Point]::new(22, 603)
-$outputBox.Size = [Drawing.Size]::new(708, 95)
+$outputBox.Location = [Drawing.Point]::new(22, 628)
+$outputBox.Size = [Drawing.Size]::new(708, 70)
 $outputBox.Multiline = $true
 $outputBox.ScrollBars = "Vertical"
 $outputBox.ReadOnly = $true
@@ -224,12 +246,16 @@ $form.Controls.Add($outputBox)
 
 $configurationControls = @(
     $mediaField, $mediaField.Tag, $downloadsField, $downloadsField.Tag,
-    $configField, $configField.Tag, $providerField,
+    $configField, $configField.Tag, $useVpn, $providerField,
     $typeField, $credentialOneField, $credentialTwoField
 )
 $existingEnvironment = Test-Path -LiteralPath $envPath
 if ($existingEnvironment) {
-    $existingNotice.Text = "Existing .env detected. The installer will reuse it and will not overwrite configuration or application data."
+    $profileLine = Get-Content -LiteralPath $envPath | Where-Object { $_ -match '^COMPOSE_PROFILES=' } | Select-Object -Last 1
+    $savedProfile = if ($profileLine) { (($profileLine -split '=', 2)[1].Trim()).Trim("'`"") } else { "vpn" }
+    $useVpn.Checked = $savedProfile -ne "direct"
+    $modeDescription = if ($useVpn.Checked) { "VPN-protected mode" } else { "DIRECT MODE (no VPN)" }
+    $existingNotice.Text = "Existing .env detected ($modeDescription). The installer will reuse it and will not overwrite configuration or application data."
     foreach ($control in $configurationControls) { $control.Enabled = $false }
     $installButton.Text = "Start / update"
 } else {
@@ -281,15 +307,30 @@ $timer.Add_Tick({
 $installButton.Add_Click({
     if ($script:installing) { return }
     if (-not $existingEnvironment) {
-        foreach ($field in @($mediaField, $downloadsField, $configField, $providerField)) {
+        foreach ($field in @($mediaField, $downloadsField, $configField)) {
             if ([string]::IsNullOrWhiteSpace($field.Text)) {
-                [Windows.Forms.MessageBox]::Show("Choose the three folders and your VPN provider.", "Servarr Stack", "OK", "Warning") | Out-Null
+                [Windows.Forms.MessageBox]::Show("Choose the media, downloads, and application-config folders.", "Servarr Stack", "OK", "Warning") | Out-Null
                 return
             }
         }
-        if ([string]::IsNullOrWhiteSpace($credentialOneField.Text) -or [string]::IsNullOrWhiteSpace($credentialTwoField.Text)) {
-            [Windows.Forms.MessageBox]::Show("Enter the credentials required for the selected VPN type.", "Servarr Stack", "OK", "Warning") | Out-Null
-            return
+        if ($useVpn.Checked) {
+            if ([string]::IsNullOrWhiteSpace($providerField.Text)) {
+                [Windows.Forms.MessageBox]::Show("Choose or type your VPN provider.", "Servarr Stack", "OK", "Warning") | Out-Null
+                return
+            }
+            if ([string]::IsNullOrWhiteSpace($credentialOneField.Text) -or [string]::IsNullOrWhiteSpace($credentialTwoField.Text)) {
+                [Windows.Forms.MessageBox]::Show("Enter the credentials required for the selected VPN type.", "Servarr Stack", "OK", "Warning") | Out-Null
+                return
+            }
+        } else {
+            $confirmation = [Windows.Forms.MessageBox]::Show(
+                "NO VPN MODE`n`nqBittorrent will connect directly. Torrent peers can see this connection's public IP address. This setting does not make unlawful use acceptable.`n`nContinue without VPN protection?",
+                "Public IP exposure warning",
+                [Windows.Forms.MessageBoxButtons]::YesNo,
+                [Windows.Forms.MessageBoxIcon]::Warning,
+                [Windows.Forms.MessageBoxDefaultButton]::Button2
+            )
+            if ($confirmation -ne [Windows.Forms.DialogResult]::Yes) { return }
         }
     }
 
@@ -298,16 +339,21 @@ $installButton.Add_Click({
         $arguments.MediaPath = $mediaField.Text
         $arguments.DownloadsPath = $downloadsField.Text
         $arguments.ConfigPath = $configField.Text
-        $providerName = $providerField.Text.Trim()
-        $arguments.VpnProvider = if ($providerMap.Contains($providerName)) { $providerMap[$providerName] } else { $providerName.ToLowerInvariant() }
-        if ($typeField.SelectedItem -eq "WireGuard") {
-            $arguments.VpnType = "wireguard"
-            $arguments.WireGuardPrivateKey = $credentialOneField.Text
-            $arguments.WireGuardAddresses = $credentialTwoField.Text
+        if ($useVpn.Checked) {
+            $arguments.NetworkMode = "vpn"
+            $providerName = $providerField.Text.Trim()
+            $arguments.VpnProvider = if ($providerMap.Contains($providerName)) { $providerMap[$providerName] } else { $providerName.ToLowerInvariant() }
+            if ($typeField.SelectedItem -eq "WireGuard") {
+                $arguments.VpnType = "wireguard"
+                $arguments.WireGuardPrivateKey = $credentialOneField.Text
+                $arguments.WireGuardAddresses = $credentialTwoField.Text
+            } else {
+                $arguments.VpnType = "openvpn"
+                $arguments.OpenVpnUser = $credentialOneField.Text
+                $arguments.OpenVpnPassword = $credentialTwoField.Text
+            }
         } else {
-            $arguments.VpnType = "openvpn"
-            $arguments.OpenVpnUser = $credentialOneField.Text
-            $arguments.OpenVpnPassword = $credentialTwoField.Text
+            $arguments.NetworkMode = "direct"
         }
     }
     if ($validateOnly.Checked) { $arguments.NoLaunch = $true }

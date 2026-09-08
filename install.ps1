@@ -11,6 +11,8 @@ param(
     [string]$OpenVpnPassword,
     [string]$WireGuardPrivateKey,
     [string]$WireGuardAddresses,
+    [ValidateSet("vpn", "direct")]
+    [string]$NetworkMode = "vpn",
     [int]$Puid = 1000,
     [int]$Pgid = 1000,
     [switch]$NonInteractive,
@@ -44,6 +46,18 @@ function ConvertTo-EnvValue {
     return "'" + ($Value -replace "'", "\\'") + "'"
 }
 
+function Get-EnvRawSetting {
+    param([string]$Name, [string]$Default)
+    if (-not (Test-Path -LiteralPath $envFile)) { return $Default }
+    $line = Get-Content -LiteralPath $envFile | Where-Object { $_ -match "^$([regex]::Escape($Name))=" } | Select-Object -Last 1
+    if (-not $line) { return $Default }
+    $value = ($line -split "=", 2)[1].Trim()
+    if ($value.Length -ge 2 -and (($value[0] -eq "'" -and $value[-1] -eq "'") -or ($value[0] -eq '"' -and $value[-1] -eq '"'))) {
+        $value = $value.Substring(1, $value.Length - 2)
+    }
+    return $value
+}
+
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw "Docker was not found. Install Docker Desktop, start it, and rerun this script."
 }
@@ -54,19 +68,29 @@ if ($LASTEXITCODE -ne 0) { throw "Docker Compose v2 ('docker compose') is requir
 
 if (Test-Path -LiteralPath $envFile) {
     Write-Host "Using the existing .env. No values or data were overwritten."
+    $activeProfile = Get-EnvRawSetting "COMPOSE_PROFILES" "vpn"
+    if ($activeProfile -notin @("vpn", "direct")) { throw "COMPOSE_PROFILES in .env must be vpn or direct." }
+    if (-not (Select-String -LiteralPath $envFile -Pattern '^COMPOSE_PROFILES=' -Quiet)) {
+        Add-Content -LiteralPath $envFile -Value "COMPOSE_PROFILES='vpn'"
+        Write-Host "Added the new VPN profile setting to the existing .env; all prior values were preserved."
+    }
 } else {
     $defaultData = Join-Path $stackRoot "data"
     $MediaPath = Read-Value "Media directory" $MediaPath (Join-Path $defaultData "media")
     $DownloadsPath = Read-Value "Downloads directory" $DownloadsPath (Join-Path $defaultData "downloads")
     $ConfigPath = Read-Value "Application config directory" $ConfigPath (Join-Path $defaultData "config")
-    $VpnProvider = Read-Value "Gluetun VPN provider identifier" $VpnProvider "your-provider"
-
-    if ($VpnType -eq "openvpn") {
-        $OpenVpnUser = Read-Value "OpenVPN service username" $OpenVpnUser ""
-        $OpenVpnPassword = Read-Value "OpenVPN service password" $OpenVpnPassword "" -Secret
+    if ($NetworkMode -eq "vpn") {
+        $VpnProvider = Read-Value "Gluetun VPN provider identifier" $VpnProvider "your-provider"
+        if ($VpnType -eq "openvpn") {
+            $OpenVpnUser = Read-Value "OpenVPN service username" $OpenVpnUser ""
+            $OpenVpnPassword = Read-Value "OpenVPN service password" $OpenVpnPassword "" -Secret
+        } else {
+            $WireGuardPrivateKey = Read-Value "WireGuard private key" $WireGuardPrivateKey "" -Secret
+            $WireGuardAddresses = Read-Value "WireGuard address (for example 10.0.0.2/32)" $WireGuardAddresses ""
+        }
     } else {
-        $WireGuardPrivateKey = Read-Value "WireGuard private key" $WireGuardPrivateKey "" -Secret
-        $WireGuardAddresses = Read-Value "WireGuard address (for example 10.0.0.2/32)" $WireGuardAddresses ""
+        $VpnProvider = "not-configured"
+        Write-Warning "DIRECT MODE: qBittorrent traffic will not use a VPN, and torrent peers can see this connection's public IP address."
     }
 
     $MediaPath = [IO.Path]::GetFullPath($MediaPath).Replace('\', '/')
@@ -90,6 +114,7 @@ if (Test-Path -LiteralPath $envFile) {
         "DOWNLOADS_ROOT=$(ConvertTo-EnvValue $DownloadsPath)",
         "CONFIG_ROOT=$(ConvertTo-EnvValue $ConfigPath)",
         "PUID=$Puid", "PGID=$Pgid", "TZ=$(ConvertTo-EnvValue $TimeZone)",
+        "COMPOSE_PROFILES=$(ConvertTo-EnvValue $NetworkMode)",
         "VPN_SERVICE_PROVIDER=$(ConvertTo-EnvValue $VpnProvider)",
         "VPN_TYPE=$(ConvertTo-EnvValue $VpnType)", "SERVER_COUNTRIES=''",
         "OPENVPN_USER=$(ConvertTo-EnvValue $OpenVpnUser)",
@@ -101,10 +126,11 @@ if (Test-Path -LiteralPath $envFile) {
     )
     [IO.File]::WriteAllLines($envFile, $lines, [Text.UTF8Encoding]::new($false))
     $createdEnvironment = $true
+    $activeProfile = $NetworkMode
     Write-Host "Created $envFile. Keep it private."
 }
 
-docker compose --env-file $envFile -f (Join-Path $stackRoot "docker-compose.yml") config --quiet
+docker compose --profile $activeProfile --env-file $envFile -f (Join-Path $stackRoot "docker-compose.yml") config --quiet
 if ($LASTEXITCODE -ne 0) { throw "The resolved Compose configuration is invalid." }
 
 if ($NoLaunch) {
@@ -112,14 +138,15 @@ if ($NoLaunch) {
     exit 0
 }
 
-docker compose --env-file $envFile -f (Join-Path $stackRoot "docker-compose.yml") pull
+docker compose --profile $activeProfile --env-file $envFile -f (Join-Path $stackRoot "docker-compose.yml") pull
 if ($LASTEXITCODE -ne 0) { throw "One or more images could not be pulled." }
-docker compose --env-file $envFile -f (Join-Path $stackRoot "docker-compose.yml") up -d
+docker compose --profile $activeProfile --env-file $envFile -f (Join-Path $stackRoot "docker-compose.yml") up -d
 if ($LASTEXITCODE -ne 0) { throw "The stack did not start successfully." }
 
 if ($createdEnvironment) {
+    $qbitService = if ($activeProfile -eq "vpn") { "qbittorrent-vpn" } else { "qbittorrent" }
     for ($attempt = 0; $attempt -lt 15; $attempt++) {
-        $qbitLogs = docker compose --env-file $envFile -f (Join-Path $stackRoot "docker-compose.yml") logs --no-color --tail 100 qbittorrent 2>$null | Out-String
+        $qbitLogs = docker compose --profile $activeProfile --env-file $envFile -f (Join-Path $stackRoot "docker-compose.yml") logs --no-color --tail 100 $qbitService 2>$null | Out-String
         $passwordMatch = [regex]::Match($qbitLogs, 'temporary password[^:]*:\s*(\S+)', 'IgnoreCase')
         if ($passwordMatch.Success) {
             Write-Host "qBittorrent first-login username: admin"
