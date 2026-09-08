@@ -7,13 +7,14 @@ $ErrorActionPreference = "Stop"
 $stackRoot = $PSScriptRoot
 $enginePath = Join-Path $stackRoot "install.ps1"
 $composePath = Join-Path $stackRoot "docker-compose.yml"
+$configurationPath = Join-Path $stackRoot "configure-stack.ps1"
 $envPath = Join-Path $stackRoot ".env"
 
 if (-not $IsWindows -and $PSVersionTable.PSEdition -eq "Core") {
     throw "The graphical installer requires Windows. Linux users should run ./install.sh."
 }
-if (-not (Test-Path -LiteralPath $enginePath) -or -not (Test-Path -LiteralPath $composePath)) {
-    throw "install.ps1 and docker-compose.yml must be beside windows-installer.ps1."
+if (-not (Test-Path -LiteralPath $enginePath) -or -not (Test-Path -LiteralPath $composePath) -or -not (Test-Path -LiteralPath $configurationPath)) {
+    throw "install.ps1, configure-stack.ps1, and docker-compose.yml must be beside windows-installer.ps1."
 }
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -70,8 +71,8 @@ function Add-TextField {
 $form = [Windows.Forms.Form]::new()
 $form.Text = "Servarr Stack Installer"
 $form.StartPosition = "CenterScreen"
-$form.ClientSize = [Drawing.Size]::new(760, 720)
-$form.MinimumSize = [Drawing.Size]::new(776, 759)
+$form.ClientSize = [Drawing.Size]::new(760, 850)
+$form.MinimumSize = [Drawing.Size]::new(776, 889)
 $form.Font = [Drawing.Font]::new("Segoe UI", 9)
 $form.AutoScaleMode = "Dpi"
 
@@ -92,11 +93,20 @@ $defaultData = Join-Path $stackRoot "data"
 $dataField = Add-TextField $form "Shared data directory" 110 $defaultData -Browse
 $configField = Add-TextField $form "Application config directory" 150 (Join-Path $stackRoot "config") -Browse
 
+$adminGroup = [Windows.Forms.GroupBox]::new()
+$adminGroup.Text = "One login for Jellyfin, Seerr, and qBittorrent"
+$adminGroup.Location = [Drawing.Point]::new(18, 185)
+$adminGroup.Size = [Drawing.Size]::new(714, 135)
+$form.Controls.Add($adminGroup)
+$adminUserField = Add-TextField $adminGroup "Administrator username" 30 "admin"
+$adminEmailField = Add-TextField $adminGroup "Administrator email" 65 ""
+$adminPasswordField = Add-TextField $adminGroup "Administrator password" 100 "" -Secret
+
 $useVpn = [Windows.Forms.CheckBox]::new()
 $useVpn.Text = "Route qBittorrent through a VPN (recommended)"
 $useVpn.Checked = $true
 $useVpn.Font = [Drawing.Font]::new("Segoe UI Semibold", 9)
-$useVpn.Location = [Drawing.Point]::new(22, 190)
+$useVpn.Location = [Drawing.Point]::new(22, 330)
 $useVpn.Size = [Drawing.Size]::new(330, 28)
 $form.Controls.Add($useVpn)
 
@@ -104,14 +114,14 @@ $directWarning = [Windows.Forms.Label]::new()
 $directWarning.Text = "WARNING: Without a VPN, torrent peers can see your public IP address."
 $directWarning.Font = [Drawing.Font]::new("Segoe UI Semibold", 9)
 $directWarning.ForeColor = [Drawing.Color]::DarkRed
-$directWarning.Location = [Drawing.Point]::new(355, 194)
+$directWarning.Location = [Drawing.Point]::new(355, 334)
 $directWarning.Size = [Drawing.Size]::new(375, 25)
 $directWarning.Visible = $false
 $form.Controls.Add($directWarning)
 
 $vpnGroup = [Windows.Forms.GroupBox]::new()
 $vpnGroup.Text = "VPN connection"
-$vpnGroup.Location = [Drawing.Point]::new(18, 223)
+$vpnGroup.Location = [Drawing.Point]::new(18, 363)
 $vpnGroup.Size = [Drawing.Size]::new(714, 245)
 $form.Controls.Add($vpnGroup)
 
@@ -203,39 +213,39 @@ $useVpn.Add_CheckedChanged({
 
 $validateOnly = [Windows.Forms.CheckBox]::new()
 $validateOnly.Text = "Validate only (do not pull images or start containers)"
-$validateOnly.Location = [Drawing.Point]::new(22, 480)
+$validateOnly.Location = [Drawing.Point]::new(22, 620)
 $validateOnly.Size = [Drawing.Size]::new(360, 24)
 $form.Controls.Add($validateOnly)
 
 $openJellyfin = [Windows.Forms.CheckBox]::new()
-$openJellyfin.Text = "Open Jellyfin setup when installation finishes"
+$openJellyfin.Text = "Open Seerr when installation finishes"
 $openJellyfin.Checked = $true
-$openJellyfin.Location = [Drawing.Point]::new(390, 480)
+$openJellyfin.Location = [Drawing.Point]::new(390, 620)
 $openJellyfin.Size = [Drawing.Size]::new(340, 24)
 $form.Controls.Add($openJellyfin)
 
 $existingNotice = [Windows.Forms.Label]::new()
-$existingNotice.Location = [Drawing.Point]::new(22, 510)
+$existingNotice.Location = [Drawing.Point]::new(22, 650)
 $existingNotice.Size = [Drawing.Size]::new(710, 34)
 $existingNotice.ForeColor = [Drawing.Color]::FromArgb(120, 70, 0)
 $form.Controls.Add($existingNotice)
 
 $progress = [Windows.Forms.ProgressBar]::new()
-$progress.Location = [Drawing.Point]::new(22, 550)
+$progress.Location = [Drawing.Point]::new(22, 690)
 $progress.Size = [Drawing.Size]::new(558, 25)
 $progress.Style = "Blocks"
 $form.Controls.Add($progress)
 
 $installButton = [Windows.Forms.Button]::new()
 $installButton.Text = "Install"
-$installButton.Location = [Drawing.Point]::new(595, 546)
+$installButton.Location = [Drawing.Point]::new(595, 686)
 $installButton.Size = [Drawing.Size]::new(135, 34)
 $form.AcceptButton = $installButton
 $form.Controls.Add($installButton)
 
 $outputBox = [Windows.Forms.TextBox]::new()
-$outputBox.Location = [Drawing.Point]::new(22, 593)
-$outputBox.Size = [Drawing.Size]::new(708, 105)
+$outputBox.Location = [Drawing.Point]::new(22, 733)
+$outputBox.Size = [Drawing.Size]::new(708, 95)
 $outputBox.Multiline = $true
 $outputBox.ScrollBars = "Vertical"
 $outputBox.ReadOnly = $true
@@ -244,7 +254,8 @@ $outputBox.Text = "Ready. Docker Desktop must be installed and running."
 $form.Controls.Add($outputBox)
 
 $configurationControls = @(
-    $dataField, $dataField.Tag, $configField, $configField.Tag, $useVpn, $providerField,
+    $dataField, $dataField.Tag, $configField, $configField.Tag,
+    $adminUserField, $adminEmailField, $adminPasswordField, $useVpn, $providerField,
     $typeField, $credentialOneField, $credentialTwoField
 )
 $existingEnvironment = Test-Path -LiteralPath $envPath
@@ -283,7 +294,7 @@ $timer.Add_Tick({
         } else {
             $installButton.Text = "Completed"
             if (-not $validateOnly.Checked -and $openJellyfin.Checked) {
-                Start-Process "http://localhost:8096"
+                Start-Process "http://localhost:5055"
             }
             [Windows.Forms.MessageBox]::Show(
                 "Servarr Stack setup completed successfully.",
@@ -305,11 +316,23 @@ $timer.Add_Tick({
 $installButton.Add_Click({
     if ($script:installing) { return }
     if (-not $existingEnvironment) {
-        foreach ($field in @($dataField, $configField)) {
+        foreach ($field in @($dataField, $configField, $adminUserField, $adminEmailField, $adminPasswordField)) {
             if ([string]::IsNullOrWhiteSpace($field.Text)) {
-                [Windows.Forms.MessageBox]::Show("Choose the shared data and application-config folders.", "Servarr Stack", "OK", "Warning") | Out-Null
+                [Windows.Forms.MessageBox]::Show("Complete the folder and administrator fields.", "Servarr Stack", "OK", "Warning") | Out-Null
                 return
             }
+        }
+        if ($adminUserField.Text -notmatch '^[A-Za-z0-9._-]{3,32}$') {
+            [Windows.Forms.MessageBox]::Show("The administrator username must be 3-32 characters using letters, numbers, dots, underscores, or hyphens.", "Servarr Stack", "OK", "Warning") | Out-Null
+            return
+        }
+        if ($adminPasswordField.Text.Length -lt 12) {
+            [Windows.Forms.MessageBox]::Show("Use an administrator password containing at least 12 characters.", "Servarr Stack", "OK", "Warning") | Out-Null
+            return
+        }
+        if ($adminEmailField.Text -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') {
+            [Windows.Forms.MessageBox]::Show("Enter a valid administrator email address.", "Servarr Stack", "OK", "Warning") | Out-Null
+            return
         }
         if ($useVpn.Checked) {
             if ([string]::IsNullOrWhiteSpace($providerField.Text)) {
@@ -336,6 +359,10 @@ $installButton.Add_Click({
     if (-not $existingEnvironment) {
         $arguments.DataPath = $dataField.Text
         $arguments.ConfigPath = $configField.Text
+        $arguments.AdminUsername = $adminUserField.Text
+        $arguments.AdminEmail = $adminEmailField.Text
+        $arguments.AdminPassword = $adminPasswordField.Text
+        $arguments.ConfigureApplications = $true
         if ($useVpn.Checked) {
             $arguments.NetworkMode = "vpn"
             $providerName = $providerField.Text.Trim()

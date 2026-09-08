@@ -12,9 +12,9 @@ A portable Docker Compose stack for automated media organization and playback. I
 1. Install and start Docker Desktop.
 2. Download this repository with **Code → Download ZIP**, then extract it.
 3. Double-click **`Install-ServarrStack.cmd`**.
-4. Choose one shared data folder, a separate application-config folder, and the connection mode. If VPN protection is selected, enter the VPN settings. Select **Install**.
+4. Choose one shared data folder, a separate application-config folder, one administrator login, and the connection mode. If VPN protection is selected, enter the VPN settings. Select **Install**.
 
-The graphical installer displays progress and errors, preserves existing `.env` and application data when rerun, and opens Jellyfin setup after a successful installation. Windows may show a standard warning because this community script is not code-signed; its complete source is included as `windows-installer.ps1`.
+The graphical installer creates the Jellyfin account and libraries, configures qBittorrent, enables hardlinks, connects Sonarr/Radarr/Prowlarr, initializes Seerr, and then opens Seerr. API keys are discovered locally and never shown or sent away. Windows may show a standard warning because this community script is not code-signed; its complete source is included as `windows-installer.ps1`.
 
 Alternatively, install from PowerShell:
 
@@ -37,7 +37,7 @@ chmod +x install.sh
 
 The graphical Windows installer, PowerShell engine, and Linux installer prompt for a shared data root, a separate config root, and VPN settings; create directories; prove the selected data root can hardlink between downloads and media; create a private `.env`; validate Compose; pull images; and start the stack. Rerunning an installer reuses `.env` and existing data without deleting or overwriting it.
 
-The folder fields are prefilled with a hardlink-compatible layout. VPN protection is selected by default, but users without a VPN can choose direct mode after acknowledging the public-IP warning. After the first start, the installer displays qBittorrent's temporary login when one is available and opens Jellyfin's first-run setup.
+The folder fields are prefilled with a hardlink-compatible layout. VPN protection is selected by default, but users without a VPN can choose direct mode after acknowledging the public-IP warning. The administrator password stays in memory during installation and is saved only by the local applications that need it; it is not written to `.env` or this repository.
 
 For non-interactive examples, run `Get-Help .\install.ps1 -Detailed` or `./install.sh --help`. On Linux, pass `--without-vpn` to select direct mode. Use `-NoLaunch` (Windows) or `--no-launch` (Linux) to create and validate the configuration without pulling or starting containers.
 
@@ -135,14 +135,26 @@ Compare that last address with your normal public address. In VPN mode, `qbittor
 
 ## First-time application setup
 
-1. **qBittorrent:** Open port 8080. The installer displays the temporary admin password when available. To retrieve it later, run `docker compose logs qbittorrent-vpn` in VPN mode or `docker compose logs qbittorrent` in direct mode. Sign in, change the password, set the default save path to `/data/downloads/complete`, and set the incomplete path to `/data/downloads/incomplete`. Keep the Web UI port at `8080` inside the container.
-2. **Sonarr:** Add `/data/media/tv` as the root folder. Under **Settings → Download Clients**, add qBittorrent with port `8080` and its Web UI credentials. Use host `gluetun` in VPN mode or `qbittorrent` in direct mode. Use category `tv`.
-3. **Radarr:** Add `/data/media/movies` as the root folder. Add the same qBittorrent endpoint—`gluetun:8080` in VPN mode or `qbittorrent:8080` in direct mode—with category `movies`.
-4. **Prowlarr:** Add only indexers you are authorized to use. Under **Settings → Apps**, add Sonarr at `http://sonarr:8989` and Radarr at `http://radarr:7878`, using the API keys displayed in each app under **Settings → General**.
-5. **Jellyfin:** Create a new local administrator, then add a Shows library at `/media/tv` and a Movies library at `/media/movies`. Do not expose Jellyfin directly to the internet without authentication and a properly configured reverse proxy.
-6. **Seerr:** Connect Jellyfin at `http://jellyfin:8096`, then connect Sonarr and Radarr using their internal service URLs and API keys.
+The Windows graphical installer completes the repetitive setup automatically:
 
-API keys remain in each application's ignored config directory. They are never part of this repository.
+- Creates the Jellyfin administrator and the Movies and TV Shows libraries.
+- Changes qBittorrent from its temporary login to the chosen administrator login and sets `/data/downloads/complete` and `/data/downloads/incomplete`.
+- Adds `/data/media/tv` to Sonarr and `/data/media/movies` to Radarr, explicitly enables hardlinks, and connects both to qBittorrent with separate categories.
+- Connects Prowlarr to Sonarr and Radarr using API keys read only from the local config directories.
+- Connects Seerr to Jellyfin, Sonarr, and Radarr, selects the first available quality profile, and opens Seerr.
+
+The remaining user step is to add indexers or sources that the user is authorized to access in Prowlarr. Those choices and credentials cannot be safely guessed or bundled. After that, ordinary use is **open Seerr → request a movie or show → watch it in Jellyfin**.
+
+PowerShell users can request the same automation with `-ConfigureApplications` plus `-AdminUsername`, `-AdminPassword`, and `-AdminEmail`. Linux users currently use the manual application setup below; the graphical zero-API-key wizard is Windows-only. API keys remain in the ignored application config directories and are never part of this repository.
+
+### Linux or manual fallback
+
+1. In qBittorrent, change the temporary login and set the save paths to `/data/downloads/complete` and `/data/downloads/incomplete`.
+2. In Sonarr, add `/data/media/tv`; in Radarr, add `/data/media/movies`; keep **Use Hardlinks instead of Copy** enabled.
+3. Add qBittorrent to each manager at `gluetun:8080` in VPN mode or `qbittorrent:8080` in direct mode, using categories `tv` and `movies`.
+4. In Prowlarr, connect Sonarr at `http://sonarr:8989` and Radarr at `http://radarr:7878` using their locally displayed API keys.
+5. Create the Jellyfin administrator and add Movies at `/media/movies` and TV Shows at `/media/tv`.
+6. In Seerr, connect Jellyfin at `http://jellyfin:8096`, then add Sonarr and Radarr using their internal hostnames and local API keys.
 
 ## Networking and VPN isolation
 

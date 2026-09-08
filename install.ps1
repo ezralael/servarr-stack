@@ -14,6 +14,10 @@ param(
     [string]$NetworkMode = "vpn",
     [int]$Puid = 1000,
     [int]$Pgid = 1000,
+    [string]$AdminUsername,
+    [string]$AdminPassword,
+    [string]$AdminEmail,
+    [switch]$ConfigureApplications,
     [switch]$NonInteractive,
     [switch]$NoLaunch
 )
@@ -173,19 +177,34 @@ if ($LASTEXITCODE -ne 0) { throw "One or more images could not be pulled." }
 docker compose --profile $activeProfile --env-file $envFile -f (Join-Path $stackRoot "docker-compose.yml") up -d
 if ($LASTEXITCODE -ne 0) { throw "The stack did not start successfully." }
 
+$qbitInitialPassword = ""
 if ($createdEnvironment) {
     $qbitService = if ($activeProfile -eq "vpn") { "qbittorrent-vpn" } else { "qbittorrent" }
-    for ($attempt = 0; $attempt -lt 15; $attempt++) {
+    for ($attempt = 0; $attempt -lt 60; $attempt++) {
         $qbitLogs = docker compose --profile $activeProfile --env-file $envFile -f (Join-Path $stackRoot "docker-compose.yml") logs --no-color --tail 100 $qbitService 2>$null | Out-String
         $passwordMatch = [regex]::Match($qbitLogs, 'temporary password[^:]*:\s*(\S+)', 'IgnoreCase')
         if ($passwordMatch.Success) {
+            $qbitInitialPassword = $passwordMatch.Groups[1].Value
             Write-Host "qBittorrent first-login username: admin"
-            Write-Host "qBittorrent temporary password: $($passwordMatch.Groups[1].Value)"
-            Write-Host "Change that password in qBittorrent after signing in."
+            if (-not $ConfigureApplications) {
+                Write-Host "qBittorrent temporary password: $qbitInitialPassword"
+                Write-Host "Change that password in qBittorrent after signing in."
+            }
             break
         }
-        Start-Sleep -Seconds 1
+        Start-Sleep -Seconds 2
     }
+}
+
+if ($ConfigureApplications -and $createdEnvironment) {
+    if (-not $AdminUsername -or -not $AdminPassword -or -not $AdminEmail) {
+        throw "Administrator username, password, and email are required for automatic application setup."
+    }
+    if (-not $qbitInitialPassword) { throw "qBittorrent did not provide its first-run password in time." }
+    $configurationScript = Join-Path $stackRoot "configure-stack.ps1"
+    if (-not (Test-Path -LiteralPath $configurationScript)) { throw "configure-stack.ps1 is missing." }
+    & $configurationScript -AdminUsername $AdminUsername -AdminPassword $AdminPassword -AdminEmail $AdminEmail -QbitInitialPassword $qbitInitialPassword -EnvFile $envFile -NoBrowser
+    if ($LASTEXITCODE -ne 0) { throw "Automatic application setup did not complete." }
 }
 
 function Get-EnvSetting {
