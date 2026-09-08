@@ -20,6 +20,7 @@ param(
 $ErrorActionPreference = "Stop"
 $stackRoot = $PSScriptRoot
 $envFile = Join-Path $stackRoot ".env"
+$createdEnvironment = $false
 
 function Read-Value {
     param([string]$Prompt, [string]$Current, [string]$Default, [switch]$Secret)
@@ -99,6 +100,7 @@ if (Test-Path -LiteralPath $envFile) {
         "SONARR_PORT=8989", "RADARR_PORT=7878", "JELLYFIN_PORT=8096", "SEERR_PORT=5055"
     )
     [IO.File]::WriteAllLines($envFile, $lines, [Text.UTF8Encoding]::new($false))
+    $createdEnvironment = $true
     Write-Host "Created $envFile. Keep it private."
 }
 
@@ -114,6 +116,20 @@ docker compose --env-file $envFile -f (Join-Path $stackRoot "docker-compose.yml"
 if ($LASTEXITCODE -ne 0) { throw "One or more images could not be pulled." }
 docker compose --env-file $envFile -f (Join-Path $stackRoot "docker-compose.yml") up -d
 if ($LASTEXITCODE -ne 0) { throw "The stack did not start successfully." }
+
+if ($createdEnvironment) {
+    for ($attempt = 0; $attempt -lt 15; $attempt++) {
+        $qbitLogs = docker compose --env-file $envFile -f (Join-Path $stackRoot "docker-compose.yml") logs --no-color --tail 100 qbittorrent 2>$null | Out-String
+        $passwordMatch = [regex]::Match($qbitLogs, 'temporary password[^:]*:\s*(\S+)', 'IgnoreCase')
+        if ($passwordMatch.Success) {
+            Write-Host "qBittorrent first-login username: admin"
+            Write-Host "qBittorrent temporary password: $($passwordMatch.Groups[1].Value)"
+            Write-Host "Change that password in qBittorrent after signing in."
+            break
+        }
+        Start-Sleep -Seconds 1
+    }
+}
 
 function Get-EnvSetting {
     param([string]$Name, [string]$Default)

@@ -47,7 +47,10 @@ foreach ($service in $configTargets.Keys) {
 $jellyfinCache = @($resolved.services.jellyfin.volumes | Where-Object { $_.target -eq "/cache" })
 Assert-True ($jellyfinCache.Count -eq 1 -and $jellyfinCache[0].type -eq "volume") "Jellyfin cache uses an explicit persistent volume"
 
-$required = @("docker-compose.yml", ".env.example", ".gitignore", "install.ps1", "install.sh", "README.md", "LICENSE")
+$required = @(
+    "docker-compose.yml", ".env.example", ".gitignore", "install.ps1", "install.sh",
+    "Install-ServarrStack.cmd", "windows-installer.ps1", "README.md", "LICENSE"
+)
 foreach ($file in $required) { Assert-True (Test-Path -LiteralPath (Join-Path $root $file)) "$file exists" }
 
 $files = @(Get-ChildItem -LiteralPath $root -File -Recurse -Force |
@@ -68,6 +71,10 @@ $psTokens = $null
 $psErrors = $null
 [void][Management.Automation.Language.Parser]::ParseFile((Join-Path $root "install.ps1"), [ref]$psTokens, [ref]$psErrors)
 Assert-True ($psErrors.Count -eq 0) "install.ps1 parses successfully"
+$wizardTokens = $null
+$wizardErrors = $null
+[void][Management.Automation.Language.Parser]::ParseFile((Join-Path $root "windows-installer.ps1"), [ref]$wizardTokens, [ref]$wizardErrors)
+Assert-True ($wizardErrors.Count -eq 0) "windows-installer.ps1 parses successfully"
 
 $bashCommand = Get-Command bash -ErrorAction SilentlyContinue
 if ($bashCommand -and $bashCommand.Source -notmatch '(?i)\\Windows\\system32\\bash\.exe$') {

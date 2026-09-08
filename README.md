@@ -7,9 +7,16 @@ A portable Docker Compose stack for automated media organization and playback. I
 
 ## Quick start
 
-### Windows
+### Windows graphical installer
 
-Install and start Docker Desktop, then open PowerShell:
+1. Install and start Docker Desktop.
+2. Download this repository with **Code → Download ZIP**, then extract it.
+3. Double-click **`Install-ServarrStack.cmd`**.
+4. Choose the media, downloads, and application-config folders; enter the VPN settings; and select **Install**.
+
+The graphical installer displays progress and errors, preserves existing `.env` and application data when rerun, and opens Jellyfin setup after a successful installation. Windows may show a standard warning because this community script is not code-signed; its complete source is included as `windows-installer.ps1`.
+
+Alternatively, install from PowerShell:
 
 ```powershell
 git clone https://github.com/ezralael/servarr-stack.git
@@ -28,7 +35,9 @@ chmod +x install.sh
 ./install.sh
 ```
 
-Both installers prompt for media, download, config, and VPN settings; create directories and a private `.env`; validate Compose; pull images; and start the stack. Rerunning an installer reuses `.env` and existing data without deleting or overwriting it.
+The graphical Windows installer, PowerShell engine, and Linux installer prompt for media, download, config, and VPN settings; create directories and a private `.env`; validate Compose; pull images; and start the stack. Rerunning an installer reuses `.env` and existing data without deleting or overwriting it.
+
+The folder fields are prefilled with recommended locations, so most Windows users only need to select their VPN provider and enter its manual/service credentials. After the first start, the installer displays qBittorrent's temporary login when one is available and opens Jellyfin's first-run setup.
 
 For non-interactive examples, run `Get-Help .\install.ps1 -Detailed` or `./install.sh --help`. Use `-NoLaunch` (Windows) or `--no-launch` (Linux) to create and validate the configuration without pulling or starting containers.
 
